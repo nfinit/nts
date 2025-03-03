@@ -223,7 +223,7 @@ display_menu() {
     item_idx=$((item_idx + 1))
   done
   
-  echo " q) Quit"
+  printf " %2s) %s\n" "q" "Quit"
   echo ""
   
   # Get user selection
