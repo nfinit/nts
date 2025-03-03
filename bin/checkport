@@ -54,8 +54,8 @@ main() {
     exit 1
   fi
   
-  # Check if port is numeric
-  if ! echo "$port" | grep -q '^[0-9]\+$'; then
+  # Check if port is numeric - Fixed regex to be more portable across Unix variants
+  if ! echo "$port" | grep -E '^[0-9]+$' >/dev/null 2>&1; then
     echo "Error: Port must be a number" >&2
     exit 1
   fi
