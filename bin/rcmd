@@ -1,0 +1,168 @@
+#!/bin/sh
+# rcmd - Run Command with interactive argument prompting
+# Part of the NTS (New Terminal System)
+
+# Constants
+VERSION="1.0.0"
+
+# Print usage information
+print_usage() {
+  echo "Usage: rcmd [options] [command [initial_arguments...]]"
+  echo ""
+  echo "Options:"
+  echo "  -v, --version     Display version information"
+  echo "  -h, --help        Display this help message"
+  echo ""
+  echo "If a command is provided, prompts for additional arguments."
+  echo "If no command is provided, prompts for both command and arguments."
+  echo ""
+  echo "Examples:"
+  echo "  rcmd ls          # Run ls with interactively provided arguments"
+  echo "  rcmd ls -l       # Run ls -l with additional interactively provided arguments"
+  echo "  rcmd             # Prompt for both command and arguments"
+}
+
+# Check if a command exists
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+# Get the user's default shell
+get_default_shell() {
+  # Try to use the SHELL environment variable
+  if [ -n "$SHELL" ] && [ -x "$SHELL" ]; then
+    echo "$SHELL"
+    return
+  fi
+  
+  # Try to get from passwd file
+  current_user=""
+  if command_exists whoami; then
+    current_user=$(whoami)
+  elif command_exists id; then
+    current_user=$(id -un)
+  fi
+  
+  if [ -n "$current_user" ]; then
+    user_shell=$(getent passwd "$current_user" 2>/dev/null | cut -d: -f7)
+    if [ -n "$user_shell" ] && [ -x "$user_shell" ]; then
+      echo "$user_shell"
+      return
+    fi
+  fi
+  
+  # Fall back to common shells
+  for shell in /bin/bash /bin/sh /usr/bin/bash /usr/bin/sh; do
+    if [ -x "$shell" ]; then
+      echo "$shell"
+      return
+    fi
+  done
+  
+  # Ultimate fallback
+  echo "/bin/sh"
+}
+
+# Check if a string contains shell metacharacters that could be used for command chaining
+has_shell_metacharacters() {
+  input="$1"
+  
+  # Check for common shell metacharacters used for command chaining
+  echo "$input" | grep -q '[;&|]'
+  return $?
+}
+
+# Main function
+main() {
+  # Parse command line arguments
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -v|--version)
+        echo "NTS Run Command v${VERSION}"
+        exit 0
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      -*)
+        echo "Error: Unknown option: $1" >&2
+        print_usage
+        exit 1
+        ;;
+      *)
+        # First non-option argument is the command
+        command="$1"
+        shift
+        # Remaining arguments are initial arguments
+        initial_args="$*"
+        break
+        ;;
+    esac
+    shift
+  done
+  
+  # If no command provided, prompt for it
+  if [ -z "$command" ]; then
+    printf "Enter command: "
+    read -r full_command
+    
+    # Check if command is empty
+    if [ -z "$full_command" ]; then
+      echo "Error: No command specified" >&2
+      exit 1
+    fi
+    
+    # Check for command chaining attempts
+    if has_shell_metacharacters "$full_command"; then
+      echo "Error: Command chaining not allowed" >&2
+      exit 1
+    fi
+    
+    # Extract the base command and any arguments
+    base_command=$(echo "$full_command" | awk '{print $1}')
+    cmd_args=$(echo "$full_command" | cut -d' ' -f2-)
+  else
+    # Command was provided as an argument
+    base_command="$command"
+    cmd_args="$initial_args"
+  fi
+  
+  # Check if the base command exists
+  if ! command_exists "$base_command"; then
+    echo "Error: Command not found: $base_command" >&2
+    exit 1
+  fi
+  
+  # Prompt for additional arguments
+  prompt="Enter additional arguments for '$base_command'"
+  if [ -n "$cmd_args" ]; then
+    prompt="$prompt (current: $cmd_args)"
+  fi
+  printf "%s: " "$prompt"
+  read -r additional_args
+  
+  # Check for command chaining attempts in arguments
+  if has_shell_metacharacters "$additional_args"; then
+    echo "Error: Command chaining not allowed in arguments" >&2
+    exit 1
+  fi
+  
+  # Combine all arguments
+  final_cmd="$base_command"
+  if [ -n "$cmd_args" ]; then
+    final_cmd="$final_cmd $cmd_args"
+  fi
+  if [ -n "$additional_args" ]; then
+    final_cmd="$final_cmd $additional_args"
+  fi
+  
+  # Get user's shell
+  user_shell=$(get_default_shell)
+  
+  # Execute the command with arguments using the user's shell
+  exec "$user_shell" -c "$final_cmd"
+}
+
+# Execute main function
+main "$@"
