@@ -14,7 +14,7 @@ ALLOWED_COMMANDS_FILE="${SYSTEM_CONFIG_DIR}/allowed-commands"
 BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 
 # Constants
-VERSION="1.0.0"
+VERSION="2.3.0"
 
 # Print usage information
 print_usage() {
@@ -472,7 +472,11 @@ display_menu() {
         # Clear screen and show what we're doing
         clear_screen
         echo "Executing: $cmd"
-        echo "----------------------------"
+        if command -v hr >/dev/null 2>&1; then
+          hr
+        else
+          echo "----------------------------"
+        fi
         echo ""
         
         # Execute the command
@@ -480,7 +484,11 @@ display_menu() {
         
         # Wait for user to acknowledge completion
         echo ""
-        echo "----------------------------"
+        if command -v hr >/dev/null 2>&1; then
+          hr
+        else
+          echo "----------------------------"
+        fi
         echo "Command completed. Press Enter to continue..."
         read -r dummy
       fi
