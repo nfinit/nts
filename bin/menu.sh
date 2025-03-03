@@ -173,8 +173,16 @@ display_menu() {
   # Build deduplicated list (user entries take precedence)
   idx=1
   IFS=":"
-  reversed_labels=$(echo "$menu_labels" | tr ':' '\n' | tac | tr '\n' ':')
-  reversed_commands=$(echo "$menu_commands" | tr ':' '\n' | tac | tr '\n' ':')
+  # Try to use reverse-lines utility, fall back to sed if not available
+  if command -v reverse-lines >/dev/null 2>&1; then
+    # Use the dedicated NTS utility for line reversal
+    reversed_labels=$(echo "$menu_labels" | tr ':' '\n' | reverse-lines | tr '\n' ':')
+    reversed_commands=$(echo "$menu_commands" | tr ':' '\n' | reverse-lines | tr '\n' ':')
+  else
+    # Fallback to inline sed for line reversal
+    reversed_labels=$(echo "$menu_labels" | tr ':' '\n' | sed '1!G;h;$!d' | tr '\n' ':')
+    reversed_commands=$(echo "$menu_commands" | tr ':' '\n' | sed '1!G;h;$!d' | tr '\n' ':')
+  fi
   
   for label in $reversed_labels; do
     # Skip if already processed
