@@ -131,7 +131,10 @@ connect_telnet() {
     telnet "$host"
   fi
   
-  return $?
+  # On BSD systems, telnet often returns the exit code of the remote shell
+  # which doesn't necessarily indicate connection failure.
+  # If we got this far, assume the connection worked and the user has completed their session
+  return 0
 }
 
 # Main function
@@ -222,6 +225,8 @@ main() {
   fi
   
   # Check and try protocols in order of preference
+  connection_attempted=false
+  
   for protocol_info in $PROTOCOLS; do
     protocol=$(echo "$protocol_info" | cut -d ':' -f 1)
     default_port=$(echo "$protocol_info" | cut -d ':' -f 2)
@@ -231,6 +236,7 @@ main() {
     # Check if the port for this protocol is open
     if check_port "$host" "$default_port"; then
       log_msg "debug" "$protocol port is open on $host"
+      connection_attempted=true
       
       # Try to connect using the protocol
       case "$protocol" in
@@ -257,7 +263,11 @@ main() {
   done
   
   # If we got here, all connection methods failed
-  log_msg "error" "No supported connection methods available for $host"
+  if [ "$connection_attempted" = "true" ]; then
+    log_msg "error" "All connection attempts to $host failed"
+  else
+    log_msg "error" "No supported connection methods available for $host"
+  fi
   exit 1
 }
 
