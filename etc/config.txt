@@ -1,0 +1,12 @@
+# NTS Menu System Configuration
+
+# Banner configuration
+# Uncomment one of the following options:
+banner-file=/opt/nts/etc/banner.txt
+# banner-command=figlet -f standard "NTS Menu"
+
+# Color settings (ANSI color codes)
+# header-color="\033[1;34m"    # Bold blue
+# menu-color="\033[0;32m"      # Green
+# prompt-color="\033[1;33m"    # Bold yellow
+# reset-color="\033[0m"        # Reset to default

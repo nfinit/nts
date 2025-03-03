@@ -1,0 +1,9 @@
+# User configuration for NTS Menu System
+
+# Set to "yes" to disable loading the master menu
+# disable-master-menu=no
+
+# Banner configuration (overrides system defaults)
+# Uncomment one of the following:
+# banner-file=${HOME}/.config/nts/banner.txt
+# banner-command=echo "My Custom Menu"
