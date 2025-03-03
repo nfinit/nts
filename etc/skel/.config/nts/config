@@ -3,6 +3,9 @@
 # Set to "yes" to disable loading the master menu
 # disable-master-menu=no
 
+# Captive mode configuration (only works if allow-user-disable-captive=yes in system config)
+# captive-mode=no
+
 # Banner configuration (overrides system defaults)
 # Uncomment one of the following:
 # banner-file=${HOME}/.config/nts/banner.txt

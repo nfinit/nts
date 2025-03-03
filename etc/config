@@ -5,6 +5,15 @@
 banner-file=/opt/nts/etc/banner.txt
 # banner-command=figlet -f standard "NTS Menu"
 
+# Captive mode settings
+# Set to "yes" to enable captive mode (prevent escape to shell)
+captive-mode=no
+
+# Set to "yes" to allow users to disable captive mode in their config
+allow-user-disable-captive=no
+
+# Groups that can bypass captive mode are defined in: /opt/nts/etc/bypass-groups
+
 # Color settings (ANSI color codes)
 # header-color="\033[1;34m"    # Bold blue
 # menu-color="\033[0;32m"      # Green

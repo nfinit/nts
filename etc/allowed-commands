@@ -1,0 +1,42 @@
+# Allowed commands in captive mode
+# One command per line, wildcards (*) are supported
+
+# System information
+uname
+w
+who
+uptime
+ps
+top
+df
+du
+
+# File operations (limited)
+ls
+cat
+more
+less
+head
+tail
+
+# Network utilities
+ping
+traceroute
+ifconfig
+ip
+netstat
+
+# Text editors 
+vi
+vim
+nano
+pico
+
+# NTS utilities
+ria
+menu
+checkport
+reverse-lines
+
+# Allow custom scripts in NTS directory
+/opt/nts/bin/*

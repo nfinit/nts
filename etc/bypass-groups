@@ -1,0 +1,14 @@
+# Groups that can bypass captive mode
+# One group name or ID per line
+
+# Common administrator groups
+wheel
+sudo
+admin
+staff
+
+# System groups (by name)
+root
+
+# System groups (by ID)
+0
