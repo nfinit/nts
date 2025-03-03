@@ -1,0 +1,88 @@
+#!/bin/sh
+# checkport - Check if a TCP port is open on a remote host
+# Part of the NTS (New Terminal System)
+
+# Constants
+DEFAULT_TIMEOUT=2
+
+# Print usage information
+print_usage() {
+  echo "Usage: checkport [options] host port"
+  echo ""
+  echo "Options:"
+  echo "  -t, --timeout SECONDS   Connection timeout (default: $DEFAULT_TIMEOUT)"
+  echo "  -h, --help              Display this help message"
+  echo ""
+}
+
+# Main function
+main() {
+  timeout=$DEFAULT_TIMEOUT
+  host=""
+  port=""
+  
+  # Parse arguments
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -t|--timeout)
+        shift
+        timeout="$1"
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      *)
+        if [ -z "$host" ]; then
+          host="$1"
+        elif [ -z "$port" ]; then
+          port="$1"
+        else
+          echo "Error: Unexpected argument: $1" >&2
+          print_usage
+          exit 1
+        fi
+        ;;
+    esac
+    shift
+  done
+  
+  # Check if host and port are provided
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    echo "Error: Host and port must be specified" >&2
+    print_usage
+    exit 1
+  fi
+  
+  # Check if port is numeric
+  if ! echo "$port" | grep -q '^[0-9]\+$'; then
+    echo "Error: Port must be a number" >&2
+    exit 1
+  fi
+  
+  # Try different methods to check the port
+  # 1. First try nc (netcat) if available
+  if command -v nc >/dev/null 2>&1; then
+    nc -z -w "$timeout" "$host" "$port" >/dev/null 2>&1
+    exit $?
+  fi
+  
+  # 2. Try nmap if available
+  if command -v nmap >/dev/null 2>&1; then
+    nmap -p "$port" -T4 --max-retries 1 --host-timeout "${timeout}s" "$host" | grep -q "open" >/dev/null 2>&1
+    exit $?
+  fi
+  
+  # 3. Try timeout + telnet as a fallback
+  if command -v timeout >/dev/null 2>&1 && command -v telnet >/dev/null 2>&1; then
+    timeout "$timeout" telnet "$host" "$port" </dev/null >/dev/null 2>&1
+    exit $?
+  fi
+  
+  # 4. As a last resort, try a direct /dev/tcp connection (works in bash but not in sh)
+  (echo > "/dev/tcp/$host/$port") >/dev/null 2>&1
+  exit $?
+}
+
+# Execute main function
+main "$@"
