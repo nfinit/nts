@@ -13,11 +13,12 @@ DEFAULT_BANNER_FILE="${SYSTEM_CONFIG_DIR}/banner.txt"
 ALLOWED_COMMANDS_FILE="${SYSTEM_CONFIG_DIR}/allowed-commands"
 BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 
+# Constants
 # Version history:
 # 1.0.0 - Initial implementation
 # 1.1.0 - Added captive mode
 # 1.2.0 - Added group-based bypass
-# 1.3.0 - Added utility scripts (reverse-lines, hr)
+# 1.3.0 - Added utility integration (reverse-lines, hr)
 VERSION="1.3.0"
 
 # Print usage information
