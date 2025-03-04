@@ -1,0 +1,51 @@
+#!/bin/sh
+# user-shell - Launch the current user's preferred shell as a login shell
+# Part of the NTS (New Terminal System)
+
+# Find the user's default shell
+get_user_shell() {
+  # Try the SHELL environment variable first
+  if [ -n "$SHELL" ] && [ -x "$SHELL" ]; then
+    echo "$SHELL"
+    return
+  fi
+  
+  # Fall back to checking /etc/passwd
+  current_user=""
+  if command -v whoami >/dev/null 2>&1; then
+    current_user=$(whoami)
+  elif command -v id >/dev/null 2>&1; then
+    current_user=$(id -un)
+  fi
+  
+  if [ -n "$current_user" ]; then
+    shell=$(getent passwd "$current_user" 2>/dev/null | cut -d: -f7)
+    if [ -n "$shell" ] && [ -x "$shell" ]; then
+      echo "$shell"
+      return
+    fi
+  fi
+  
+  # Ultimate fallback to system shell
+  echo "/bin/sh"
+}
+
+# Get the shell and execute it as a login shell
+shell=$(get_user_shell)
+
+# Different shells use different flags for login shells
+case "$(basename "$shell")" in
+  bash|sh)
+    exec "$shell" -l
+    ;;
+  zsh)
+    exec "$shell" -l
+    ;;
+  fish)
+    exec "$shell" --login
+    ;;
+  *)
+    # For other shells, try -l as a common option
+    exec "$shell" -l
+    ;;
+esac
