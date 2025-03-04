@@ -16,7 +16,7 @@ allow-user-disable-captive=no
 
 # Menu styling
 # Character(s) after menu item number
-# item-divider=)
+item-divider=...
 
 # Character(s) before menu item number
 # item-prefix=>
@@ -33,13 +33,13 @@ item-text-bold=no
 
 # Color settings (ANSI color codes)
 # Bold blue for header
-header-color=\033[1;34m
+# header-color=\033[1;34m
 
 # Green for menu items
-menu-color=\033[0;32m
+# menu-color=\033[0;32m
 
 # Bold yellow for prompt
-prompt-color=\033[1;33m
+# prompt-color=\033[1;33m
 
 # Reset to default
 reset-color=\033[0m

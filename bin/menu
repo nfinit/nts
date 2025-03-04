@@ -20,7 +20,8 @@ BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 # 1.2.0 - Added group-based bypass
 # 1.3.0 - Added utility integration (reverse-lines, hr)
 # 1.4.0 - Added styling options
-VERSION="1.4.0"
+# 1.5.0 - Added bold formatting options
+VERSION="1.5.0"
 
 # Default style settings
 DEFAULT_ITEM_DIVIDER=")"
@@ -59,6 +60,11 @@ initialize_styles() {
   prompt_color=""
   reset_color=""
   
+  # Bold formatting defaults
+  banner_bold="no"
+  item_number_bold="no"
+  item_text_bold="no"
+  
   # Read from system config first
   if [ -f "$SYSTEM_CONFIG_FILE" ]; then
     sys_item_divider=$(grep "^item-divider=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
@@ -67,6 +73,9 @@ initialize_styles() {
     sys_menu_color=$(grep "^menu-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
     sys_prompt_color=$(grep "^prompt-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
     sys_reset_color=$(grep "^reset-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_banner_bold=$(grep "^banner-bold=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_item_number_bold=$(grep "^item-number-bold=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_item_text_bold=$(grep "^item-text-bold=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
     
     [ -n "$sys_item_divider" ] && item_divider="$sys_item_divider"
     [ -n "$sys_item_prefix" ] && item_prefix="$sys_item_prefix"
@@ -74,6 +83,9 @@ initialize_styles() {
     [ -n "$sys_menu_color" ] && menu_color="$sys_menu_color"
     [ -n "$sys_prompt_color" ] && prompt_color="$sys_prompt_color"
     [ -n "$sys_reset_color" ] && reset_color="$sys_reset_color"
+    [ "$sys_banner_bold" = "yes" ] && banner_bold="yes"
+    [ "$sys_item_number_bold" = "yes" ] && item_number_bold="yes"
+    [ "$sys_item_text_bold" = "yes" ] && item_text_bold="yes"
   fi
   
   # Read from user config (overrides system)
@@ -84,6 +96,9 @@ initialize_styles() {
     user_menu_color=$(grep "^menu-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
     user_prompt_color=$(grep "^prompt-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
     user_reset_color=$(grep "^reset-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_banner_bold=$(grep "^banner-bold=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_item_number_bold=$(grep "^item-number-bold=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_item_text_bold=$(grep "^item-text-bold=" "$USER_CONFIG_FILE" | cut -d= -f2-)
     
     [ -n "$user_item_divider" ] && item_divider="$user_item_divider"
     [ -n "$user_item_prefix" ] && item_prefix="$user_item_prefix"
@@ -91,6 +106,9 @@ initialize_styles() {
     [ -n "$user_menu_color" ] && menu_color="$user_menu_color"
     [ -n "$user_prompt_color" ] && prompt_color="$user_prompt_color"
     [ -n "$user_reset_color" ] && reset_color="$user_reset_color"
+    [ "$user_banner_bold" = "yes" ] && banner_bold="yes"
+    [ "$user_item_number_bold" = "yes" ] && item_number_bold="yes"
+    [ "$user_item_text_bold" = "yes" ] && item_text_bold="yes"
   fi
 }
 
@@ -101,49 +119,50 @@ display_banner() {
   
   # Check user config for custom banner command or file
   if [ -f "$USER_CONFIG_FILE" ]; then
-    banner_command=$(grep "^banner_command=" "$USER_CONFIG_FILE" | cut -d= -f2-)
-    banner_file=$(grep "^banner_file=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    banner_command=$(grep "^banner-command=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    banner_file=$(grep "^banner-file=" "$USER_CONFIG_FILE" | cut -d= -f2-)
   fi
   
   # If no user config, check system config
   if [ -z "$banner_command" ] && [ -z "$banner_file" ] && [ -f "$SYSTEM_CONFIG_FILE" ]; then
-    banner_command=$(grep "^banner_command=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
-    banner_file=$(grep "^banner_file=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    banner_command=$(grep "^banner-command=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    banner_file=$(grep "^banner-file=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
   fi
+  
+  # Apply header color if defined
+  [ -n "$header_color" ] && printf "%b" "$header_color"
+  
+  # Apply bold formatting if enabled
+  [ "$banner_bold" = "yes" ] && printf "\033[1m"
   
   # If a banner command is specified, execute it
   if [ -n "$banner_command" ]; then
-    # Apply header color if defined
-    [ -n "$header_color" ] && printf "%b" "$header_color"
-    
     eval "$banner_command"
+    # Reset formatting after banner
+    [ -n "$reset_color" ] && printf "%b" "$reset_color"
     return
   fi
   
   # If a banner file is specified and exists, display it
   if [ -n "$banner_file" ] && [ -f "$banner_file" ]; then
-    # Apply header color if defined
-    [ -n "$header_color" ] && printf "%b" "$header_color"
     cat "$banner_file"
-    # Reset color after banner
+    # Reset formatting after banner
     [ -n "$reset_color" ] && printf "%b" "$reset_color"
     return
   fi
   
   # Fall back to default banner if it exists
   if [ -f "$DEFAULT_BANNER_FILE" ]; then
-    # Apply header color if defined
-    [ -n "$header_color" ] && printf "%b" "$header_color"
     cat "$DEFAULT_BANNER_FILE"
-    # Reset color after banner
+    # Reset formatting after banner
     [ -n "$reset_color" ] && printf "%b" "$reset_color"
     return
   fi
   
-  # If no banner is found, show a simple text header with header color if defined
-  [ -n "$header_color" ] && printf "%b" "$header_color"
+  # If no banner is found, show a simple text header
   echo "NTS Menu System v${VERSION}"
   echo "------------------"
+  # Reset formatting after banner
   [ -n "$reset_color" ] && printf "%b" "$reset_color"
 }
 
@@ -486,7 +505,24 @@ display_menu() {
   [ -n "$menu_color" ] && printf "%b" "$menu_color"
   
   for label in $new_menu_labels; do
-    printf "%s%2d%s %s\n" "$item_prefix" "$item_idx" "$item_divider" "$label"
+    printf "%s" "$item_prefix"
+    
+    # Apply bold to item number if enabled
+    if [ "$item_number_bold" = "yes" ]; then
+      printf "\033[1m%2d\033[22m" "$item_idx"
+    else
+      printf "%2d" "$item_idx"
+    fi
+    
+    printf "%s " "$item_divider"
+    
+    # Apply bold to item text if enabled
+    if [ "$item_text_bold" = "yes" ]; then
+      printf "\033[1m%s\033[22m\n" "$label"
+    else
+      printf "%s\n" "$label"
+    fi
+    
     item_idx=$((item_idx + 1))
     
     # For long menus, add a divider line after every 10 items
