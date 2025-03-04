@@ -2,6 +2,51 @@
 # user-shell - Launch the current user's preferred shell as a login shell
 # Part of the NTS (New Terminal System)
 
+# Constants
+VERSION="1.1.0"
+# Version history:
+# 1.0.0 - Initial implementation
+# 1.1.0 - Added screen clearing functionality
+
+# Configuration paths
+USER_CONFIG_DIR="${HOME}/.config/nts"
+USER_CONFIG_FILE="${USER_CONFIG_DIR}/config"
+
+# Print usage information
+print_usage() {
+  echo "Usage: user-shell [options]"
+  echo ""
+  echo "Options:"
+  echo "  -c, --clear       Clear screen before starting shell"
+  echo "  -v, --version     Display version information"
+  echo "  -h, --help        Display this help message"
+  echo ""
+}
+
+# Clear the screen in a terminal-compatible way
+clear_screen() {
+  # Use the clear command if available
+  if command -v clear >/dev/null 2>&1; then
+    clear
+  else
+    # Fall back to ANSI escape sequence
+    printf "\033c"
+  fi
+}
+
+# Load user configuration
+load_user_config() {
+  should_clear_screen="false"
+  
+  # Check if config file exists
+  if [ -f "$USER_CONFIG_FILE" ]; then
+    clear_setting=$(grep "^clear-screen=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    if [ "$clear_setting" = "true" ]; then
+      should_clear_screen="true"
+    fi
+  fi
+}
+
 # Find the user's default shell
 get_user_shell() {
   # Try the SHELL environment variable first
@@ -30,22 +75,62 @@ get_user_shell() {
   echo "/bin/sh"
 }
 
-# Get the shell and execute it as a login shell
-shell=$(get_user_shell)
+# Main function
+main() {
+  # Initialize variables
+  force_clear="false"
+  
+  # Load user configuration
+  load_user_config
+  
+  # Parse command line arguments
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -c|--clear)
+        force_clear="true"
+        ;;
+      -v|--version)
+        echo "NTS User Shell v${VERSION}"
+        exit 0
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      *)
+        echo "Error: Unknown option: $1" >&2
+        print_usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
+  
+  # Clear screen if configured or forced
+  if [ "$should_clear_screen" = "true" ] || [ "$force_clear" = "true" ]; then
+    clear_screen
+  fi
+  
+  # Get the user's shell
+  shell=$(get_user_shell)
+  
+  # Different shells use different flags for login shells
+  case "$(basename "$shell")" in
+    bash|sh)
+      exec "$shell" -l
+      ;;
+    zsh)
+      exec "$shell" -l
+      ;;
+    fish)
+      exec "$shell" --login
+      ;;
+    *)
+      # For other shells, try -l as a common option
+      exec "$shell" -l
+      ;;
+  esac
+}
 
-# Different shells use different flags for login shells
-case "$(basename "$shell")" in
-  bash|sh)
-    exec "$shell" -l
-    ;;
-  zsh)
-    exec "$shell" -l
-    ;;
-  fish)
-    exec "$shell" --login
-    ;;
-  *)
-    # For other shells, try -l as a common option
-    exec "$shell" -l
-    ;;
-esac
+# Execute main function
+main "$@"

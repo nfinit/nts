@@ -14,8 +14,36 @@ allow-user-disable-captive=no
 
 # Groups that can bypass captive mode are defined in: /opt/nts/etc/bypass-groups
 
+# Menu styling
+# Character(s) after menu item number
+# item-divider=)
+
+# Character(s) before menu item number
+# item-prefix=>
+
+# Bold formatting options (yes/no)
+# Make the banner text bold
+banner-bold=yes
+
+# Make the menu item numbers bold
+item-number-bold=yes
+
+# Make the menu item text bold
+item-text-bold=no
+
 # Color settings (ANSI color codes)
-# header-color="\033[1;34m"    # Bold blue
-# menu-color="\033[0;32m"      # Green
-# prompt-color="\033[1;33m"    # Bold yellow
-# reset-color="\033[0m"        # Reset to default
+# Bold blue for header
+header-color=\033[1;34m
+
+# Green for menu items
+menu-color=\033[0;32m
+
+# Bold yellow for prompt
+prompt-color=\033[1;33m
+
+# Reset to default
+reset-color=\033[0m
+
+# Alternative styling examples:
+# item-divider=" > "
+# item-prefix="  "

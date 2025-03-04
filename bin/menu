@@ -19,7 +19,12 @@ BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 # 1.1.0 - Added captive mode
 # 1.2.0 - Added group-based bypass
 # 1.3.0 - Added utility integration (reverse-lines, hr)
-VERSION="1.3.0"
+# 1.4.0 - Added styling options
+VERSION="1.4.0"
+
+# Default style settings
+DEFAULT_ITEM_DIVIDER=")"
+DEFAULT_ITEM_PREFIX=" "
 
 # Print usage information
 print_usage() {
@@ -42,6 +47,53 @@ clear_screen() {
   fi
 }
 
+# Initialize style settings
+initialize_styles() {
+  # Set default values
+  item_divider="$DEFAULT_ITEM_DIVIDER"
+  item_prefix="$DEFAULT_ITEM_PREFIX"
+  
+  # ANSI color defaults (empty means no color)
+  header_color=""
+  menu_color=""
+  prompt_color=""
+  reset_color=""
+  
+  # Read from system config first
+  if [ -f "$SYSTEM_CONFIG_FILE" ]; then
+    sys_item_divider=$(grep "^item-divider=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_item_prefix=$(grep "^item-prefix=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_header_color=$(grep "^header-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_menu_color=$(grep "^menu-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_prompt_color=$(grep "^prompt-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    sys_reset_color=$(grep "^reset-color=" "$SYSTEM_CONFIG_FILE" | cut -d= -f2-)
+    
+    [ -n "$sys_item_divider" ] && item_divider="$sys_item_divider"
+    [ -n "$sys_item_prefix" ] && item_prefix="$sys_item_prefix"
+    [ -n "$sys_header_color" ] && header_color="$sys_header_color"
+    [ -n "$sys_menu_color" ] && menu_color="$sys_menu_color"
+    [ -n "$sys_prompt_color" ] && prompt_color="$sys_prompt_color"
+    [ -n "$sys_reset_color" ] && reset_color="$sys_reset_color"
+  fi
+  
+  # Read from user config (overrides system)
+  if [ -f "$USER_CONFIG_FILE" ]; then
+    user_item_divider=$(grep "^item-divider=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_item_prefix=$(grep "^item-prefix=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_header_color=$(grep "^header-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_menu_color=$(grep "^menu-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_prompt_color=$(grep "^prompt-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    user_reset_color=$(grep "^reset-color=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    
+    [ -n "$user_item_divider" ] && item_divider="$user_item_divider"
+    [ -n "$user_item_prefix" ] && item_prefix="$user_item_prefix"
+    [ -n "$user_header_color" ] && header_color="$user_header_color"
+    [ -n "$user_menu_color" ] && menu_color="$user_menu_color"
+    [ -n "$user_prompt_color" ] && prompt_color="$user_prompt_color"
+    [ -n "$user_reset_color" ] && reset_color="$user_reset_color"
+  fi
+}
+
 # Display the banner/title
 display_banner() {
   banner_command=""
@@ -61,25 +113,38 @@ display_banner() {
   
   # If a banner command is specified, execute it
   if [ -n "$banner_command" ]; then
+    # Apply header color if defined
+    [ -n "$header_color" ] && printf "%b" "$header_color"
+    
     eval "$banner_command"
     return
   fi
   
   # If a banner file is specified and exists, display it
   if [ -n "$banner_file" ] && [ -f "$banner_file" ]; then
+    # Apply header color if defined
+    [ -n "$header_color" ] && printf "%b" "$header_color"
     cat "$banner_file"
+    # Reset color after banner
+    [ -n "$reset_color" ] && printf "%b" "$reset_color"
     return
   fi
   
   # Fall back to default banner if it exists
   if [ -f "$DEFAULT_BANNER_FILE" ]; then
+    # Apply header color if defined
+    [ -n "$header_color" ] && printf "%b" "$header_color"
     cat "$DEFAULT_BANNER_FILE"
+    # Reset color after banner
+    [ -n "$reset_color" ] && printf "%b" "$reset_color"
     return
   fi
   
-  # If no banner is found, show a simple text header
+  # If no banner is found, show a simple text header with header color if defined
+  [ -n "$header_color" ] && printf "%b" "$header_color"
   echo "NTS Menu System v${VERSION}"
   echo "------------------"
+  [ -n "$reset_color" ] && printf "%b" "$reset_color"
 }
 
 # Load menu items from config files
@@ -416,17 +481,36 @@ display_menu() {
   # Display menu items
   item_idx=1
   IFS=":"
+  
+  # Apply menu color if defined
+  [ -n "$menu_color" ] && printf "%b" "$menu_color"
+  
   for label in $new_menu_labels; do
-    printf " %2d) %s\n" "$item_idx" "$label"
+    printf "%s%2d%s %s\n" "$item_prefix" "$item_idx" "$item_divider" "$label"
     item_idx=$((item_idx + 1))
+    
+    # For long menus, add a divider line after every 10 items
+    if [ $((item_idx % 11)) -eq 0 ] && [ $item_idx -le $displayed_count ]; then
+      printf "%s\n" "$(printf '%0.s-' $(seq 1 40))"
+    fi
   done
   
   # printf " %2s) %s\n" "q" "Quit" # q for Quit is still handled but not shown
   echo ""
   
+  # Reset menu color before prompt
+  [ -n "$reset_color" ] && printf "%b" "$reset_color"
+  
   # Get user selection
   printf "Enter selection: "
+  
+  # Apply prompt color if defined
+  [ -n "$prompt_color" ] && printf "%b" "$prompt_color"
+  
   read -r selection
+  
+  # Reset color after input
+  [ -n "$reset_color" ] && printf "%b" "$reset_color"
   
   # Process selection
   case "$selection" in
@@ -533,6 +617,9 @@ main() {
   # Create user config directory if it doesn't exist
   if [ ! -d "$USER_CONFIG_DIR" ]; then
     mkdir -p "$USER_CONFIG_DIR"
+    
+    # Also create an example user config if it doesn't exist yet
+    [ ! -f "$USER_CONFIG_FILE" ] && cp "$SYSTEM_CONFIG_DIR/skel/.config/nts/config" "$USER_CONFIG_FILE" 2>/dev/null
   fi
   
   # Load menu items
@@ -540,6 +627,9 @@ main() {
   
   # Main menu loop
   while true; do
+    # Initialize style settings
+    initialize_styles
+    
     display_menu
   done
 }
