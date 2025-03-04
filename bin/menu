@@ -421,7 +421,7 @@ display_menu() {
     item_idx=$((item_idx + 1))
   done
   
-  printf " %2s) %s\n" "q" "Quit"
+  # printf " %2s) %s\n" "q" "Quit" # q for Quit is still handled but not shown
   echo ""
   
   # Get user selection
