@@ -7,25 +7,44 @@
 # Format: protocol_name:default_port
 PROTOCOLS="ssh:22 telnet:23"
 
+# Configuration paths
+USER_CONFIG_DIR="${HOME}/.config/nts"
+USER_CONFIG_FILE="${USER_CONFIG_DIR}/config"
+
 # Function to print usage information
 print_usage() {
-  echo "Usage: ria [options] hostname"
+  echo "Usage: ria [options] [hostname]"
+  echo ""
+  echo "If no hostname is provided, interactive mode will prompt for one."
   echo ""
   echo "Options:"
   echo "  -u, --user USERNAME   Specify username for connection"
   echo "  -p, --port PORT       Specify custom port for connection"
   echo "  -q, --quiet           Suppress non-error messages"
   echo "  -v, --verbose         Show detailed connection information"
+  echo "  -c, --clear           Clear screen before starting"
   echo "  -h, --help            Display this help message"
   echo ""
   echo "Examples:"
-  echo "  ria server1                  Connect to server1 using best available protocol"
-  echo "  ria -u admin server2         Connect to server2 as user 'admin'"
-  echo "  ria -p 2222 server3          Connect to server3 on port 2222"
+  echo "  ria                       Launch in interactive mode"
+  echo "  ria server1               Connect to server1 using best available protocol"
+  echo "  ria -u admin server2      Connect to server2 as user 'admin'"
+  echo "  ria -p 2222 server3       Connect to server3 on port 2222"
   echo ""
 }
 
 # Function to log messages based on verbosity level
+# Function to clear the screen in a terminal-compatible way
+clear_screen() {
+  # Use the clear command if available
+  if command -v clear >/dev/null 2>&1; then
+    clear
+  else
+    # Fall back to ANSI escape sequence
+    printf "\033c"
+  fi
+}
+
 log_msg() {
   level=$1
   message=$2
@@ -89,6 +108,32 @@ connect_ssh() {
     return 1
   fi
   
+  # Prompt for username if not specified and we're in interactive mode
+  if [ -z "$user" ]; then
+    current_user=""
+    if [ -n "$USER" ]; then
+      current_user="$USER"
+    elif [ -n "$LOGNAME" ]; then
+      current_user="$LOGNAME"
+    elif command -v whoami >/dev/null 2>&1; then
+      current_user=$(whoami)
+    fi
+    
+    if [ -n "$current_user" ]; then
+      printf "Enter username for SSH connection [%s]: " "$current_user"
+    else
+      printf "Enter username for SSH connection: "
+    fi
+    read -r input_user
+    
+    # If user entered a username, use it; otherwise, keep using the default
+    if [ -n "$input_user" ]; then
+      user="$input_user"
+    else
+      user="$current_user"
+    fi
+  fi
+  
   # Construct SSH command
   ssh_cmd="ssh"
   
@@ -137,6 +182,42 @@ connect_telnet() {
   return 0
 }
 
+# Function to run interactive mode
+interactive_mode() {
+  # Prompt for hostname
+  printf "Enter hostname: "
+  read -r input_host
+  
+  # Check if hostname is provided
+  if [ -z "$input_host" ]; then
+    log_msg "error" "No hostname specified"
+    return 1
+  fi
+  
+  # Set the global host variable
+  host="$input_host"
+  
+  return 0
+}
+
+# Load user configuration
+load_user_config() {
+  should_clear_screen="false"
+  
+  # Create user config directory if it doesn't exist
+  if [ ! -d "$USER_CONFIG_DIR" ]; then
+    mkdir -p "$USER_CONFIG_DIR"
+  fi
+  
+  # Load configuration if it exists
+  if [ -f "$USER_CONFIG_FILE" ]; then
+    clear_setting=$(grep "^clear-screen=" "$USER_CONFIG_FILE" | cut -d= -f2-)
+    if [ "$clear_setting" = "true" ]; then
+      should_clear_screen="true"
+    fi
+  fi
+}
+
 # Main function
 main() {
   # Initialize variables
@@ -145,6 +226,10 @@ main() {
   user=""
   quiet="false"
   verbose="false"
+  force_clear="false"
+  
+  # Load user configuration
+  load_user_config
   
   # Parse command line arguments
   while [ "$#" -gt 0 ]; do
@@ -163,6 +248,9 @@ main() {
       -v|--verbose)
         verbose="true"
         ;;
+      -c|--clear)
+        force_clear="true"
+        ;;
       -h|--help)
         print_usage
         exit 0
@@ -180,11 +268,16 @@ main() {
     shift
   done
   
-  # Check if hostname is provided
+  # Clear screen if configured or forced
+  if [ "$should_clear_screen" = "true" ] || [ "$force_clear" = "true" ]; then
+    clear_screen
+  fi
+  
+  # Check if hostname is provided, if not, enter interactive mode
   if [ -z "$host" ]; then
-    log_msg "error" "No hostname specified"
-    print_usage
-    exit 1
+    if ! interactive_mode; then
+      exit 1
+    fi
   fi
   
   # Custom port handling

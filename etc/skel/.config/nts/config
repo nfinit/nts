@@ -10,3 +10,7 @@
 # Uncomment one of the following:
 # banner-file=${HOME}/.config/nts/banner.txt
 # banner-command=echo "My Custom Menu"
+
+# Terminal display settings
+# Set to "true" to clear screen before starting utilities
+clear-screen=false
