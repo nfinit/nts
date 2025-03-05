@@ -2,8 +2,8 @@
 
 # Banner configuration
 # Uncomment one of the following options:
-banner-file=/opt/nts/etc/banner.txt
-# banner-command=figlet -f standard "NTS Menu"
+# banner-file=/opt/nts/etc/banner.txt
+banner-command=/opt/nts/bin/menu-banner
 
 # Captive mode settings
 # Set to "yes" to enable captive mode (prevent escape to shell)

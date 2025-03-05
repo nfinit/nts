@@ -3,14 +3,16 @@
 # Part of the NTS (New Terminal System)
 
 # Constants
-VERSION="1.1.0"
+VERSION="1.2.0"
 # Version history:
 # 1.0.0 - Initial implementation
 # 1.1.0 - Added screen clearing functionality
+# 1.2.0 - Added detection for menu shell to prevent recursion
 
 # Configuration paths
 USER_CONFIG_DIR="${HOME}/.config/nts"
 USER_CONFIG_FILE="${USER_CONFIG_DIR}/config"
+NTS_MENU_PATHS="/opt/nts/bin/menu /usr/local/bin/menu /bin/menu"
 
 # Print usage information
 print_usage() {
@@ -45,6 +47,28 @@ load_user_config() {
       should_clear_screen="true"
     fi
   fi
+}
+
+# Check if a shell path refers to the menu program
+is_menu_shell() {
+  shell_path="$1"
+  
+  # Extract just the binary name without path
+  shell_base=$(basename "$shell_path")
+  
+  # Check if it's named "menu"
+  if [ "$shell_base" = "menu" ]; then
+    return 0  # It is a menu shell
+  fi
+  
+  # Also check if it's a full path to a known menu script
+  for menu_path in $NTS_MENU_PATHS; do
+    if [ "$shell_path" = "$menu_path" ]; then
+      return 0  # It is a menu shell
+    fi
+  done
+  
+  return 1  # Not a menu shell
 }
 
 # Find the user's default shell
@@ -113,6 +137,12 @@ main() {
   
   # Get the user's shell
   shell=$(get_user_shell)
+  
+  # Check if it's the menu shell
+  if is_menu_shell "$shell"; then
+    echo "Shell access is not permitted on this terminal." 
+    return 1
+  fi
   
   # Different shells use different flags for login shells
   case "$(basename "$shell")" in

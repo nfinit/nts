@@ -22,7 +22,8 @@ BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 # 1.4.0 - Added styling options
 # 1.5.0 - Added bold formatting options
 # 1.6.0 - Added automatic PATH update for NTS utilities
-VERSION="1.6.0"
+# 1.6.1 - Minor output changes 
+VERSION="1.6.1"
 
 # Default style settings
 DEFAULT_ITEM_DIVIDER=")"
@@ -650,7 +651,7 @@ display_menu() {
         
         # Clear screen and show what we're doing
         clear_screen
-        echo "Executing: $cmd"
+        echo "$cmd"
         if command -v hr >/dev/null 2>&1; then
           hr
         else
@@ -668,7 +669,7 @@ display_menu() {
         else
           echo "----------------------------"
         fi
-        echo "Command completed. Press Enter to continue..."
+        echo "Press Enter to continue..."
         read -r dummy
       fi
       ;;

@@ -1,0 +1,4 @@
+#!/bin/sh
+cat /opt/nts/etc/banner
+uname -a
+uptime
