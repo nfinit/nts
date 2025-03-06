@@ -1,4 +1,4 @@
 #!/bin/sh
 cat /opt/nts/etc/banner
-uname -a
-uptime
+echo "Welcome to $(hostname -s) ($(uname -mrs))"
+uuptime -n

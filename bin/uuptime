@@ -1,0 +1,144 @@
+#!/bin/sh
+# uuptime - Uptime with unique user count for system status reporting
+# Part of the NTS (New Terminal System)
+
+# Version history:
+# 1.0.0 - Initial implementation
+# 1.1.0 - Added option to hide the time display
+
+VERSION="1.1.0"
+
+# Print usage information
+print_usage() {
+  echo "Usage: uuptime [options]"
+  echo ""
+  echo "Display system uptime information with unique user count"
+  echo ""
+  echo "Options:"
+  echo "  -n, --no-time     Hide the time display at the beginning of output"
+  echo "  -v, --version     Display version information"
+  echo "  -h, --help        Display this help message"
+  echo ""
+}
+
+# Get list of unique users currently logged in
+get_unique_users() {
+  # Try users command first (most common)
+  if command -v users >/dev/null 2>&1; then
+    users_output=$(users 2>/dev/null)
+    if [ -n "$users_output" ]; then
+      echo "$users_output" | tr ' ' '\n' | sort | uniq | grep -v '^$'
+      return
+    fi
+  fi
+  
+  # Alternative using who command
+  if command -v who >/dev/null 2>&1; then
+    who_output=$(who 2>/dev/null)
+    if [ -n "$who_output" ]; then
+      echo "$who_output" | awk '{print $1}' | sort | uniq
+      return
+    fi
+  fi
+  
+  # Fallback to w command
+  if command -v w >/dev/null 2>&1; then
+    w_output=$(w -h 2>/dev/null)
+    if [ -n "$w_output" ]; then
+      echo "$w_output" | awk '{print $1}' | sort | uniq
+      return
+    fi
+  fi
+  
+  # Ultimate fallback - if none of the above work, just indicate unknown
+  echo "Error: Cannot determine logged-in users" >&2
+  echo "UNKNOWN"
+  return 1
+}
+
+# Count unique users
+count_unique_users() {
+  users_list=$(get_unique_users)
+  if [ "$users_list" = "UNKNOWN" ]; then
+    echo "?"
+    return 1
+  fi
+  
+  # Count non-empty lines
+  count=$(echo "$users_list" | grep -v '^$' | wc -l)
+  # Remove leading/trailing whitespace (portable across Unix variants)
+  count=$(echo "$count" | sed 's/^ *//;s/ *$//')
+  echo "$count"
+}
+
+# Main function
+main() {
+  # Initialize variables
+  no_time="false"
+  
+  # Parse command line arguments
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -n|--no-time)
+        no_time="true"
+        ;;
+      -v|--version)
+        echo "NTS uuptime v${VERSION}"
+        exit 0
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      *)
+        echo "Error: Unknown option: $1" >&2
+        print_usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
+  
+  # Check if uptime command is available
+  if ! command -v uptime >/dev/null 2>&1; then
+    echo "Error: uptime command not available" >&2
+    exit 1
+  fi
+  
+  # Get uptime output
+  uptime_output=$(uptime)
+  
+  # Get count of unique users
+  user_count=$(count_unique_users)
+  
+  # Handle the case where user count could not be determined
+  if [ "$user_count" = "?" ]; then
+    # Could not determine unique user count, return regular uptime
+    echo "$uptime_output" | sed 's/  */ /g'
+    return
+  fi
+  
+  # Modify uptime output to include unique user count
+  if [ "$user_count" -eq 1 ]; then
+    # Singular form for one user
+    modified=$(echo "$uptime_output" | sed 's/ users,/ sessions, '"$user_count"' user,/')
+  else
+    # Plural form for multiple users
+    modified=$(echo "$uptime_output" | sed 's/ users,/ sessions, '"$user_count"' users,/')
+  fi
+  
+  # Clean up multiple spaces (using a more portable sed syntax)
+  uptime_output=$(echo "$modified" | sed 's/  */ /g')
+  
+  # Remove time display if requested
+  if [ "$no_time" = "true" ]; then
+    # Strip everything before "up" (which should be the time)
+    uptime_output=$(echo "$uptime_output" | sed 's/^.*up/up/')
+  fi
+  
+  # Output the result
+  echo "$uptime_output"
+}
+
+# Execute main function
+main "$@"
