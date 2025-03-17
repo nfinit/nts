@@ -24,11 +24,112 @@ BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 # 1.6.0 - Added automatic PATH update for NTS utilities
 # 1.6.1 - Minor output changes 
 # 1.7.0 - Improved signal handling to prevent unintended menu exit
-VERSION="1.7.0"
+# 1.8.0 - Added Logoff option for captive users and users with menu as default shell
+VERSION="1.8.0"
 
 # Default style settings
 DEFAULT_ITEM_DIVIDER=")"
 DEFAULT_ITEM_PREFIX=" "
+
+# Known paths for the menu command
+NTS_MENU_PATHS="/opt/nts/bin/menu /usr/local/bin/menu /bin/menu"
+
+# Check if menu is the user's default shell
+is_menu_default_shell() {
+  # Get the path to this script
+  script_path="$0"
+  case "$script_path" in
+    */*)
+      # Path contains directory component, use it
+      script_dir=$(dirname "$script_path")
+      script_name=$(basename "$script_path")
+      ;;
+    *)
+      # No directory component, try to locate it
+      if command -v which >/dev/null 2>&1; then
+        found_path=$(which "$script_path" 2>/dev/null)
+        if [ -n "$found_path" ]; then
+          script_dir=$(dirname "$found_path")
+          script_name=$(basename "$found_path")
+        else
+          script_dir="."
+          script_name="$script_path"
+        fi
+      elif command -v command >/dev/null 2>&1; then
+        found_path=$(command -v "$script_path" 2>/dev/null)
+        if [ -n "$found_path" ]; then
+          script_dir=$(dirname "$found_path")
+          script_name=$(basename "$found_path")
+        else
+          script_dir="."
+          script_name="$script_path"
+        fi
+      else
+        script_dir="."
+        script_name="$script_path"
+      fi
+      ;;
+  esac
+  
+  # Get absolute path if possible
+  if [ -d "$script_dir" ]; then
+    script_dir=$(cd "$script_dir" 2>/dev/null && pwd)
+  fi
+  
+  # Construct full path to this script
+  full_script_path="${script_dir}/${script_name}"
+  
+  # Try to get the current user
+  current_user=""
+  if [ -n "$USER" ]; then
+    current_user="$USER"
+  elif [ -n "$LOGNAME" ]; then
+    current_user="$LOGNAME"
+  elif command -v whoami >/dev/null 2>&1; then
+    current_user=$(whoami)
+  elif command -v id >/dev/null 2>&1; then
+    current_user=$(id -un)
+  fi
+  
+  # If we couldn't determine the username, assume menu is not the default shell
+  if [ -z "$current_user" ]; then
+    return 1
+  fi
+  
+  # Get the user's default shell from passwd
+  user_shell=""
+  if command -v getent >/dev/null 2>&1; then
+    user_shell=$(getent passwd "$current_user" 2>/dev/null | cut -d: -f7)
+  elif [ -f "/etc/passwd" ]; then
+    user_shell=$(grep "^$current_user:" /etc/passwd 2>/dev/null | cut -d: -f7)
+  fi
+  
+  # If we couldn't determine the shell, assume menu is not the default shell
+  if [ -z "$user_shell" ]; then
+    return 1
+  fi
+  
+  # Check if the user's shell is this script or an instance of menu
+  if [ "$user_shell" = "$full_script_path" ]; then
+    return 0
+  fi
+  
+  # Also check common menu paths
+  for menu_path in $NTS_MENU_PATHS; do
+    if [ "$user_shell" = "$menu_path" ]; then
+      return 0
+    fi
+  done
+  
+  # If shell basename is "menu", it's likely our menu
+  shell_basename=$(basename "$user_shell")
+  if [ "$shell_basename" = "menu" ]; then
+    return 0
+  fi
+  
+  # Menu is not the default shell
+  return 1
+}
 
 # Update PATH to include script's directory
 update_path() {
@@ -454,6 +555,7 @@ setup_captive_mode() {
   # Default captive mode setting
   captive_mode="no"
   allow_user_disable="no"
+  menu_is_default_shell="false"
   
   # Check system config for captive mode
   if [ -f "$SYSTEM_CONFIG_FILE" ]; then
@@ -482,6 +584,11 @@ setup_captive_mode() {
     captive_mode="no"
     echo "Captive mode bypassed due to group membership"
     sleep 1
+  fi
+  
+  # Check if menu is the user's default shell
+  if is_menu_default_shell; then
+    menu_is_default_shell="true"
   fi
   
   # Set up signal handling if captive mode is enabled
@@ -593,15 +700,20 @@ display_menu() {
     item_idx=$((item_idx + 1))
     
     # For long menus, add a divider line after every 10 items
-    if [ $((item_idx % 11)) -eq 0 ] && [ $item_idx -le $displayed_count ]; then
+    if [ $((item_idx % 11)) -eq 0 ] && [ $ite_idx -le $displayed_count ]; then
       printf "%s\n" "$(printf '%0.s-' $(seq 1 40))"
     fi
   done
   
-  # Add exit option (but don't display in captive mode)
-  if [ "$handle_quit_captive" = "false" ]; then
+  # Add exit/logoff option with appropriate label
+  if [ "$handle_quit_captive" = "false" ] && [ "$menu_is_default_shell" = "false" ]; then
+    # Regular users with shell access see "Exit"
     printf " %2s%s %s\n" "x" "$item_divider" "Exit"
+  else
+    # Users in captive mode OR with menu as default shell see "Logoff"
+    printf " %2s%s %s\n" "x" "$item_divider" "Logoff"
   fi
+  
   echo ""
   
   # Reset menu color before prompt
@@ -611,7 +723,7 @@ display_menu() {
   printf "Enter selection: "
   
   # Apply prompt color if defined
-  [ -n "$promptolor" ] && printf "%b" "$prompt_color"
+  [ -n "$prompt_color" ] && printf "%b" "$prompt_color"
   
   read -r selection
   
@@ -621,10 +733,9 @@ display_menu() {
   # Process selection
   case "$selection" in
     x|X)
-      if [ "$handle_quit_captive" = "true" ]; then
-        echo "Cannot exit in captive mode"
-        sleep 1
-        return
+      if [ "$handle_quit_captive" = "true" ] || [ "$menu_is_default_shell" = "true" ]; then
+        echo "Logging off..."
+        exit 0
       else
         echo "Exiting..."
         exit 0
@@ -762,7 +873,7 @@ main() {
   load_menu_items
   
   # Set up basic signal handlers if we're not in captive mode
-  # (Captive mde has its own more restrictive handlers)
+  # (Captive mode has its own more restrictive handlers)
   if [ "$captive_mode" != "yes" ]; then
     setup_signal_handlers
   fi
