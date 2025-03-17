@@ -23,7 +23,8 @@ BYPASS_GROUPS_FILE="${SYSTEM_CONFIG_DIR}/bypass-groups"
 # 1.5.0 - Added bold formatting options
 # 1.6.0 - Added automatic PATH update for NTS utilities
 # 1.6.1 - Minor output changes 
-VERSION="1.6.1"
+# 1.7.0 - Improved signal handling to prevent unintended menu exit
+VERSION="1.7.0"
 
 # Default style settings
 DEFAULT_ITEM_DIVIDER=")"
@@ -439,6 +440,15 @@ is_command_allowed() {
   fi
 }
 
+# Set up basic signal handlers for non-captive mode
+setup_signal_handlers() {
+  # Handle interrupt (Ctrl+C) by just returning to the main menu
+  trap 'echo ""; echo "Interrupted - returning to menu..."; sleep 1; return' INT
+  
+  # For termination signals, be a bit more graceful but still exit
+  trap 'echo ""; echo "Termination signal received, exiting..."; exit 1' TERM
+}
+
 # Setup captive mode if configured
 setup_captive_mode() {
   # Default captive mode setting
@@ -485,8 +495,10 @@ setup_captive_mode() {
     # In true captive shells, also override the quit function
     handle_quit_captive="true"
   else
-    # Reset traps if captive mode is disabled
-    trap - 2 15 20 EXIT
+    # In non-captive mode, set up basic signal handlers
+    # Only for INT (Ctrl+C), as we still want to allow normal termination
+    trap 'echo ""; echo "Interrupted - returning to menu..."; sleep 1' INT
+    
     handle_quit_captive="false"
   fi
 }
@@ -586,7 +598,10 @@ display_menu() {
     fi
   done
   
-  # printf " %2s) %s\n" "q" "Quit" # q for Quit is still handled but not shown
+  # Add exit option (but don't display in captive mode)
+  if [ "$handle_quit_captive" = "false" ]; then
+    printf " %2s%s %s\n" "x" "$item_divider" "Exit"
+  fi
   echo ""
   
   # Reset menu color before prompt
@@ -596,7 +611,7 @@ display_menu() {
   printf "Enter selection: "
   
   # Apply prompt color if defined
-  [ -n "$prompt_color" ] && printf "%b" "$prompt_color"
+  [ -n "$promptolor" ] && printf "%b" "$prompt_color"
   
   read -r selection
   
@@ -605,13 +620,13 @@ display_menu() {
   
   # Process selection
   case "$selection" in
-    q|Q)
+    x|X)
       if [ "$handle_quit_captive" = "true" ]; then
         echo "Cannot exit in captive mode"
         sleep 1
         return
       else
-        echo "Exiting menu..."
+        echo "Exiting..."
         exit 0
       fi
       ;;
@@ -659,8 +674,29 @@ display_menu() {
         fi
         echo ""
         
-        # Execute the command
-        eval "$cmd"
+        # Save current trap state
+        trap_save=$(trap)
+        
+        # We need to run the command in a way that isolates its signal handling
+        # from our script. We'll use a subshell for this.
+        (
+          # Execute the command in a subshell
+          eval "$cmd"
+          echo $? > /tmp/nts_cmd_exit_$
+        ) # No need to disable our trap - the subshell gets clean signal handling
+        
+        # Get the exit code from the temp file
+        if [ -f "/tmp/nts_cmd_exit_$" ]; then
+          cmd_exit_code=$(cat "/tmp/nts_cmd_exit_$")
+          rm -f "/tmp/nts_cmd_exit_$"
+        else
+          # If no exit code file, the command was likely interrupted
+          cmd_exit_code=130  # Standard exit code for SIGINT
+        fi
+        
+        # Make sure our INT trap is properly restored
+        # This is belt-and-suspenders approach to guarantee we don't lose our trap
+        trap 'echo ""; echo "Interrupted - returning to menu..."; sleep 1' INT
         
         # Wait for user to acknowledge completion
         echo ""
@@ -669,6 +705,12 @@ display_menu() {
         else
           echo "----------------------------"
         fi
+        
+        # Check exit code - use quotes around variable and ensure it's a number
+        if [ -n "$cmd_exit_code" ] && [ "$cmd_exit_code" -ne 0 ]; then
+          echo "Command exited with status $cmd_exit_code"
+        fi
+        
         echo "Press Enter to continue..."
         read -r dummy
       fi
@@ -719,10 +761,22 @@ main() {
   # Load menu items
   load_menu_items
   
+  # Set up basic signal handlers if we're not in captive mode
+  # (Captive mde has its own more restrictive handlers)
+  if [ "$captive_mode" != "yes" ]; then
+    setup_signal_handlers
+  fi
+  
   # Main menu loop
   while true; do
     # Initialize style settings
     initialize_styles
+    
+    # If we get here after a command was interrupted with Ctrl+C,
+    # make sure our signal handler is still in place
+    if [ "$captive_mode" != "yes" ]; then
+      trap 'echo ""; echo "Interrupted - returning to menu..."; sleep 1' INT
+    fi
     
     display_menu
   done
