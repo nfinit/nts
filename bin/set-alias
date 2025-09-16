@@ -1,0 +1,12 @@
+SYSTEM_CONFIG_DIR="/opt/nts/etc"
+ALIAS_FILE="${SYSTEM_CONFIG_DIR}/aliases"
+# Only run in interactive shells
+case $- in *i*) ;; *) return 0 2>/dev/null || exit 0 ;; esac
+[ -r "$ALIAS_FILE" ] || { return 0 2>/dev/null || exit 0; }
+set -f # no globbing
+while IFS= read -r line; do
+	case "$line" in ''|'#'*) continue ;; esac
+	# echo "Setting alias \"$line\"..."
+	eval "alias $line" 2>/dev/null || printf 'invalid alias: %s\n' "$line" >&2
+done < "$ALIAS_FILE"
+set +f 2>/dev/null
