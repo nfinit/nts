@@ -33,7 +33,31 @@ print_usage() {
   echo ""
 }
 
-# Function to log messages based on verbosity level
+# Function to determine the default username for connections
+get_default_user() {
+  if [ -n "$USER" ]; then
+    echo "$USER"
+    return
+  fi
+
+  if [ -n "$LOGNAME" ]; then
+    echo "$LOGNAME"
+    return
+  fi
+
+  if command -v whoami >/dev/null 2>&1; then
+    whoami
+    return
+  fi
+
+  if command -v id >/dev/null 2>&1; then
+    id -un
+    return
+  fi
+
+  echo ""
+}
+
 # Function to clear the screen in a terminal-compatible way
 clear_screen() {
   # Use the clear command if available
@@ -45,6 +69,7 @@ clear_screen() {
   fi
 }
 
+# Function to log messages based on verbosity level
 log_msg() {
   level=$1
   message=$2
@@ -108,29 +133,55 @@ connect_ssh() {
     return 1
   fi
   
-  # Prompt for username if not specified and we're in interactive mode
-  if [ -z "$user" ]; then
-    current_user=""
-    if [ -n "$USER" ]; then
-      current_user="$USER"
-    elif [ -n "$LOGNAME" ]; then
-      current_user="$LOGNAME"
-    elif command -v whoami >/dev/null 2>&1; then
-      current_user=$(whoami)
-    fi
-    
-    if [ -n "$current_user" ]; then
-      printf "Enter username for SSH connection [%s]: " "$current_user"
-    else
-      printf "Enter username for SSH connection: "
-    fi
-    read -r input_user
-    
-    # If user entered a username, use it; otherwise, keep using the default
-    if [ -n "$input_user" ]; then
-      user="$input_user"
-    else
-      user="$current_user"
+  # Determine or prompt for username if required
+  if [ "$user_prompt_required" = "true" ]; then
+    default_user=$(get_default_user)
+    while :; do
+      if [ -n "$default_user" ]; then
+        printf "Enter username for SSH connection [%s]: " "$default_user"
+      else
+        printf "Enter username for SSH connection: "
+      fi
+
+      if ! read -r input_user; then
+        log_msg "error" "Failed to read username"
+        return 1
+      fi
+
+      if [ -n "$input_user" ]; then
+        user="$input_user"
+      else
+        user="$default_user"
+      fi
+
+      if [ -n "$user" ]; then
+        break
+      fi
+
+      echo "Username cannot be empty." >&2
+      default_user=""
+    done
+    user_prompt_required="false"
+  elif [ -z "$user" ]; then
+    user=$(get_default_user)
+    if [ -z "$user" ]; then
+      while :; do
+        printf "Enter username for SSH connection: "
+        if ! read -r input_user; then
+          log_msg "error" "Failed to read username"
+          return 1
+        fi
+
+        if [ -n "$input_user" ]; then
+          user="$input_user"
+        fi
+
+        if [ -n "$user" ]; then
+          break
+        fi
+
+        echo "Username cannot be empty." >&2
+      done
     fi
   fi
   
@@ -227,6 +278,7 @@ main() {
   quiet="false"
   verbose="false"
   force_clear="false"
+  user_prompt_required="false"
   
   # Load user configuration
   load_user_config
@@ -235,21 +287,50 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -u|--user)
-        shift
-        user="$1"
+        if [ $# -gt 1 ]; then
+          candidate_user="$2"
+          if [ -n "$candidate_user" ] && [ "${candidate_user#-}" = "$candidate_user" ]; then
+            user="$candidate_user"
+            user_prompt_required="false"
+            shift 2
+            continue
+          fi
+          if [ -z "$candidate_user" ]; then
+            user=""
+            user_prompt_required="true"
+            shift 2
+            continue
+          fi
+        fi
+        user=""
+        user_prompt_required="true"
+        shift 1
+        continue
         ;;
       -p|--port)
-        shift
-        port="$1"
+        if [ $# -gt 1 ]; then
+          port="$2"
+          shift 2
+          continue
+        else
+          log_msg "error" "Missing argument for $1"
+          exit 1
+        fi
         ;;
       -q|--quiet)
         quiet="true"
+        shift 1
+        continue
         ;;
       -v|--verbose)
         verbose="true"
+        shift 1
+        continue
         ;;
       -c|--clear)
         force_clear="true"
+        shift 1
+        continue
         ;;
       -h|--help)
         print_usage
@@ -258,14 +339,14 @@ main() {
       *)
         if [ -z "$host" ]; then
           host="$1"
-        else
-          log_msg "error" "Unexpected argument: $1"
-          print_usage
-          exit 1
+          shift 1
+          continue
         fi
+        log_msg "error" "Unexpected argument: $1"
+        print_usage
+        exit 1
         ;;
     esac
-    shift
   done
   
   # Clear screen if configured or forced

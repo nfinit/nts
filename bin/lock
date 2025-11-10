@@ -1,0 +1,155 @@
+#!/bin/sh
+# lock - Lock terminal session
+# Locks a single terminal without logging out or disconnecting the session
+# Part of the NTS (New Terminal System)
+
+print_usage() {
+  echo "Usage: lock"
+}
+
+print_error() {
+  printf '%s\n' "$*" >&2
+}
+
+clear_screen() {
+  if command -v clear >/dev/null 2>&1; then
+    clear
+  elif command -v tput >/dev/null 2>&1; then
+    tput clear
+  else
+    printf '\033c'
+  fi
+}
+
+show_banner() {
+  user=${LOGNAME:-${USER:-$(id -un 2>/dev/null)}}
+  host=$(hostname 2>/dev/null)
+  timestamp=$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null)
+
+  [ -n "$user" ] || user="unknown user"
+  [ -n "$host" ] || host="this system"
+
+  printf '========================================\n'
+  printf ' NTS Session Locked\n'
+  printf ' Locked by: %s\n' "$user"
+  printf ' Host: %s\n' "$host"
+  if [ -n "$timestamp" ]; then
+    printf ' Time: %s\n' "$timestamp"
+  fi
+  printf '----------------------------------------\n'
+  printf ' Enter your account password to unlock.\n'
+  printf '========================================\n\n'
+}
+
+normalize_path() {
+  path=$1
+  if [ -z "$path" ]; then
+    return 1
+  fi
+
+  case "$path" in
+    /*)
+      printf '%s\n' "$path"
+      return 0
+      ;;
+  esac
+
+  dir=${path%/*}
+  file=${path##*/}
+
+  if [ "$dir" = "$path" ] || [ -z "$dir" ]; then
+    dir="."
+  fi
+
+  if [ -d "$dir" ]; then
+    resolved_dir=$(cd "$dir" 2>/dev/null && pwd)
+    if [ -n "$resolved_dir" ]; then
+      printf '%s/%s\n' "$resolved_dir" "$file"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$path"
+}
+
+self_path() {
+  case "$0" in
+    */*)
+      base=${0##*/}
+      dir=${0%/*}
+      [ "$dir" = "$0" ] && dir="."
+      resolved_dir=$(cd "$dir" 2>/dev/null && pwd)
+      if [ -n "$resolved_dir" ]; then
+        normalize_path "$resolved_dir/$base"
+        return 0
+      fi
+      ;;
+  esac
+
+  candidate=$(command -v -- "$0" 2>/dev/null)
+  if [ -n "$candidate" ]; then
+    normalize_path "$candidate"
+    return 0
+  fi
+
+  normalize_path "$0"
+}
+
+SELF_PATH=$(self_path)
+
+which_lock() {
+  candidates="lock vlock"
+
+  for candidate in $candidates; do
+    command_path=$(command -v "$candidate" 2>/dev/null) || continue
+    normalized=$(normalize_path "$command_path")
+    if [ -n "$SELF_PATH" ] && [ "$normalized" = "$SELF_PATH" ]; then
+      continue
+    fi
+    printf '%s\n' "$command_path"
+    return 0
+  done
+
+  print_error "Session locking is not supported on this system."
+  return 1
+}
+
+main() {
+  if [ $# -gt 0 ]; then
+    case "$1" in
+      -h|--help)
+        print_usage
+        return 0
+        ;;
+      *)
+        print_usage >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  lock_command=$(which_lock) || return 1
+  lock_program=${lock_command##*/}
+
+  clear_screen
+  show_banner
+
+  set -- "$lock_command"
+
+  case "$lock_program" in
+    vlock)
+      set -- "$@" "-a"
+      ;;
+  esac
+
+  "$@"
+  status=$?
+
+  if [ $status -ne 0 ]; then
+    print_error "Lock command exited with status $status."
+  fi
+
+  return $status
+}
+
+main "$@"

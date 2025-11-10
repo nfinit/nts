@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+OUTPUT="$OUTPUT$(tree --charset ascii --noreport /usr/catalog)"
+OUTPUT=$(echo "$OUTPUT" | sed "s/\/usr\/catalog/Applications available on $(uname -n):/g")
+OUTPUT=$(echo "$OUTPUT" | sed 's/^|//g')
+OUTPUT=$(echo "$OUTPUT" | sed 's/^--//g')
+OUTPUT=$(echo "$OUTPUT" | sed 's/^`--//g')
+OUTPUT=$(echo "$OUTPUT" | sed 's/^ //g')
+# OUTPUT="$(/usr/shell/rule)\n$OUTPUT\n$(/usr/shell/rule)"
+echo -e "$OUTPUT" | less
