@@ -1,0 +1,302 @@
+#!/bin/sh
+# discover-hosts - Discover candidate hosts for remote access
+# Part of the NTS (New Terminal System)
+
+VERSION="0.1.0"
+
+print_usage() {
+  echo "Usage: discover-hosts [options] [network]"
+  echo ""
+  echo "Discover candidate hosts and print tab-separated output:"
+  echo "  target<TAB>display<TAB>source"
+  echo ""
+  echo "Options:"
+  echo "  -n, --network CIDR    Network to scan (for nmap method)"
+  echo "  -m, --method METHOD   auto | nmap | neighbors | known-hosts"
+  echo "  -q, --quiet           Suppress informational messages"
+  echo "  -v, --version         Display version information"
+  echo "  -h, --help            Display this help message"
+  echo ""
+}
+
+print_error() {
+  printf "ERROR: %s\n" "$*" >&2
+}
+
+log_info() {
+  if [ "$quiet" = "true" ]; then
+    return
+  fi
+  printf "%s\n" "$*" >&2
+}
+
+detect_default_network() {
+  if command -v ip >/dev/null 2>&1; then
+    detected=$(ip -4 route 2>/dev/null | awk '
+      $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ && $1 != "127.0.0.0/8" { print $1; exit }
+    ')
+    if [ -n "$detected" ]; then
+      printf "%s\n" "$detected"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+discover_with_nmap() {
+  target_network="$1"
+
+  if ! command -v nmap >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [ -z "$target_network" ]; then
+    target_network=$(detect_default_network 2>/dev/null || true)
+  fi
+
+  if [ -z "$target_network" ]; then
+    return 1
+  fi
+
+  log_info "discover-hosts: nmap scan on ${target_network}"
+
+  nmap -sn "$target_network" 2>/dev/null | while IFS= read -r line; do
+    case "$line" in
+      "Nmap scan report for "*)
+        payload=${line#Nmap scan report for }
+
+        case "$payload" in
+          *" ("*")")
+            display=${payload% (*}
+            target=${payload#* (}
+            target=${target%)}
+            ;;
+          *)
+            target=$payload
+            display=$payload
+            ;;
+        esac
+
+        if [ -n "$target" ]; then
+          printf "%s\t%s\t%s\n" "$target" "$display" "nmap"
+        fi
+        ;;
+    esac
+  done >> "$tmp_results"
+
+  return 0
+}
+
+discover_with_neighbors() {
+  method_used="false"
+
+  if command -v ip >/dev/null 2>&1; then
+    method_used="true"
+    ip neigh 2>/dev/null | awk '{print $1}' | while IFS= read -r candidate; do
+      case "$candidate" in
+        ""|*:*|127.*)
+          continue
+          ;;
+      esac
+
+      if echo "$candidate" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" >/dev/null 2>&1; then
+        printf "%s\t%s\t%s\n" "$candidate" "$candidate" "neighbors"
+      fi
+    done >> "$tmp_results"
+  elif command -v arp >/dev/null 2>&1; then
+    method_used="true"
+    arp -an 2>/dev/null | sed -n 's/.*(\([0-9.]*\)).*/\1/p' | while IFS= read -r candidate; do
+      case "$candidate" in
+        ""|127.*)
+          continue
+          ;;
+      esac
+
+      if echo "$candidate" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" >/dev/null 2>&1; then
+        printf "%s\t%s\t%s\n" "$candidate" "$candidate" "neighbors"
+      fi
+    done >> "$tmp_results"
+  fi
+
+  if [ "$method_used" = "true" ]; then
+    return 0
+  fi
+  return 1
+}
+
+discover_from_known_hosts() {
+  known_hosts_file="${HOME}/.ssh/known_hosts"
+
+  if [ ! -r "$known_hosts_file" ]; then
+    return 1
+  fi
+
+  while IFS= read -r line; do
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+
+    set -- $line
+    host_field=$1
+
+    case "$host_field" in
+      @*)
+        host_field=$2
+        ;;
+    esac
+
+    if [ -z "$host_field" ]; then
+      continue
+    fi
+
+    echo "$host_field" | tr "," "\n" | while IFS= read -r token; do
+      case "$token" in
+        ""|\|1\|*|*"*"*|*"?"*)
+          continue
+          ;;
+      esac
+
+      case "$token" in
+        \[*\]:*)
+          token=$(echo "$token" | sed 's/^\[\([^]]*\)\]:[0-9][0-9]*$/\1/')
+          ;;
+      esac
+
+      if echo "$token" | grep -E ":[0-9]+$" >/dev/null 2>&1; then
+        token=$(echo "$token" | sed 's/:[0-9][0-9]*$//')
+      fi
+
+      case "$token" in
+        ""|*:*)
+          continue
+          ;;
+      esac
+
+      printf "%s\t%s\t%s\n" "$token" "$token" "known-hosts"
+    done >> "$tmp_results"
+  done < "$known_hosts_file"
+
+  return 0
+}
+
+cleanup() {
+  if [ -n "$tmp_results" ] && [ -f "$tmp_results" ]; then
+    rm -f "$tmp_results"
+  fi
+}
+
+main() {
+  quiet="false"
+  method="auto"
+  network=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -n|--network)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        network="$2"
+        shift 2
+        continue
+        ;;
+      -m|--method)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        method="$2"
+        shift 2
+        continue
+        ;;
+      -q|--quiet)
+        quiet="true"
+        shift
+        continue
+        ;;
+      -v|--version)
+        echo "NTS discover-hosts v${VERSION}"
+        exit 0
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        print_error "Unknown option: $1"
+        print_usage
+        exit 1
+        ;;
+      *)
+        if [ -z "$network" ]; then
+          network="$1"
+          shift
+          continue
+        fi
+        print_error "Unexpected argument: $1"
+        print_usage
+        exit 1
+        ;;
+    esac
+  done
+
+  if [ "$#" -gt 0 ]; then
+    print_error "Unexpected argument: $1"
+    print_usage
+    exit 1
+  fi
+
+  tmp_results=$(mktemp /tmp/nts_discover_hosts.XXXXXX 2>/dev/null)
+  if [ -z "$tmp_results" ] || [ ! -f "$tmp_results" ]; then
+    print_error "Unable to create temporary file"
+    exit 1
+  fi
+
+  trap cleanup EXIT INT TERM
+
+  case "$method" in
+    auto)
+      discover_with_nmap "$network" || true
+      discover_with_neighbors || true
+      discover_from_known_hosts || true
+      ;;
+    nmap)
+      if ! discover_with_nmap "$network"; then
+        print_error "nmap method unavailable (missing nmap or network)"
+        exit 1
+      fi
+      ;;
+    neighbors)
+      if ! discover_with_neighbors; then
+        print_error "neighbors method unavailable (missing ip/arp)"
+        exit 1
+      fi
+      ;;
+    known-hosts|known_hosts|knownhosts)
+      if ! discover_from_known_hosts; then
+        print_error "known-hosts method unavailable (no readable ~/.ssh/known_hosts)"
+        exit 1
+      fi
+      ;;
+    *)
+      print_error "Unknown method: $method"
+      exit 1
+      ;;
+  esac
+
+  if [ ! -s "$tmp_results" ]; then
+    print_error "No hosts discovered"
+    exit 1
+  fi
+
+  awk -F '	' '!seen[$1]++ && $1 != "" { print $0 }' "$tmp_results"
+}
+
+main "$@"

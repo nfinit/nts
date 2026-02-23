@@ -1,0 +1,596 @@
+#!/bin/sh
+# rdiscover - Discover remote hosts and connect through ria
+# Part of the NTS (New Terminal System)
+
+VERSION="0.1.0"
+
+SYSTEM_CONFIG_DIR="/opt/nts/etc"
+SYSTEM_DISCOVERY_CONFIG="${SYSTEM_CONFIG_DIR}/discovery.conf"
+USER_CONFIG_DIR="${HOME}/.config/nts"
+USER_DISCOVERY_CONFIG="${USER_CONFIG_DIR}/discovery.conf"
+USER_NTS_CONFIG="${USER_CONFIG_DIR}/config"
+
+DISCOVER_HOSTS_CMD="/opt/nts/bin/discover-hosts"
+RIA_CMD="/opt/nts/bin/ria"
+
+DEFAULT_METHOD="auto"
+DEFAULT_TIMEOUT="1"
+DEFAULT_ENABLE_TELNET="yes"
+DEFAULT_MAX_HOSTS="100"
+DEFAULT_MAX_PROBE_HOSTS="24"
+DEFAULT_NETWORK=""
+
+print_usage() {
+  echo "Usage: rdiscover [options]"
+  echo ""
+  echo "Discover SSH/Telnet hosts, present an interactive menu, then connect via ria."
+  echo ""
+  echo "Options:"
+  echo "  -n, --network CIDR    Network to scan (for nmap discovery)"
+  echo "  -m, --method METHOD   auto | nmap | neighbors | known-hosts"
+  echo "  -t, --timeout SEC     Port probe timeout (default: ${DEFAULT_TIMEOUT})"
+  echo "  -u, --user USER       Username hint for SSH connections"
+  echo "      --no-telnet       Disable Telnet probing and Telnet-only targets"
+  echo "      --max-hosts NUM   Limit number of displayed reachable hosts"
+  echo "      --max-probe-hosts NUM  Limit number of discovered hosts to probe"
+  echo "  -c, --clear           Clear screen before showing menu"
+  echo "  -q, --quiet           Suppress informational messages"
+  echo "  -v, --version         Display version information"
+  echo "  -h, --help            Display this help message"
+  echo ""
+}
+
+print_error() {
+  printf "ERROR: %s\n" "$*" >&2
+}
+
+log_info() {
+  if [ "$quiet" = "true" ]; then
+    return
+  fi
+  printf "%s\n" "$*" >&2
+}
+
+clear_screen() {
+  if command -v clear >/dev/null 2>&1; then
+    clear
+  else
+    printf "\033c"
+  fi
+}
+
+is_positive_integer() {
+  value="$1"
+  if echo "$value" | grep -E '^[0-9]+$' >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+load_discovery_config_file() {
+  cfg="$1"
+
+  if [ ! -f "$cfg" ]; then
+    return
+  fi
+
+  while IFS= read -r line; do
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+
+    key=$(echo "$line" | cut -d= -f1)
+    value=$(echo "$line" | cut -d= -f2-)
+
+    case "$key" in
+      network)
+        network="$value"
+        ;;
+      method)
+        method="$value"
+        ;;
+      timeout)
+        timeout="$value"
+        ;;
+      enable-telnet)
+        enable_telnet="$value"
+        ;;
+      max-hosts)
+        max_hosts="$value"
+        ;;
+      max-probe-hosts)
+        max_probe_hosts="$value"
+        ;;
+    esac
+  done < "$cfg"
+}
+
+load_user_nts_config() {
+  should_clear_screen="false"
+
+  if [ -f "$USER_NTS_CONFIG" ]; then
+    clear_setting=$(grep "^clear-screen=" "$USER_NTS_CONFIG" | cut -d= -f2-)
+    if [ "$clear_setting" = "true" ]; then
+      should_clear_screen="true"
+    fi
+  fi
+}
+
+resolve_commands() {
+  if [ ! -x "$DISCOVER_HOSTS_CMD" ]; then
+    if command -v discover-hosts >/dev/null 2>&1; then
+      DISCOVER_HOSTS_CMD=$(command -v discover-hosts)
+    else
+      print_error "discover-hosts utility not found"
+      return 1
+    fi
+  fi
+
+  if [ ! -x "$RIA_CMD" ]; then
+    if command -v ria >/dev/null 2>&1; then
+      RIA_CMD=$(command -v ria)
+    else
+      print_error "ria utility not found"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+run_with_hard_timeout() {
+  hard_limit="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$hard_limit" "$@"
+    return $?
+  fi
+
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$hard_limit" "$@"
+    return $?
+  fi
+
+  "$@"
+}
+
+check_port() {
+  host="$1"
+  port="$2"
+  hard_timeout=$((timeout + 2))
+  if [ "$hard_timeout" -lt 1 ]; then
+    hard_timeout=3
+  fi
+
+  if command -v checkport >/dev/null 2>&1; then
+    run_with_hard_timeout "$hard_timeout" checkport -t "$timeout" "$host" "$port" >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v nc >/dev/null 2>&1; then
+    run_with_hard_timeout "$hard_timeout" nc -z -w "$timeout" "$host" "$port" >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v nmap >/dev/null 2>&1; then
+    nmap -p "$port" -T4 --max-retries 1 --host-timeout "${timeout}s" "$host" | grep -q "open" >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v timeout >/dev/null 2>&1 && command -v telnet >/dev/null 2>&1; then
+    timeout "$timeout" telnet "$host" "$port" </dev/null >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v bash >/dev/null 2>&1; then
+    run_with_hard_timeout "$hard_timeout" bash -c "echo > /dev/tcp/$host/$port" >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
+discover_candidates() {
+  set -- "$DISCOVER_HOSTS_CMD" -q -m "$method"
+  if [ -n "$network" ]; then
+    set -- "$@" -n "$network"
+  fi
+
+  if ! "$@" > "$tmp_candidates"; then
+    return 1
+  fi
+
+  if [ ! -s "$tmp_candidates" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+probe_candidates() {
+  tab=$(printf '\t')
+  reachable_count=0
+  probed_count=0
+  total_candidates=$(wc -l < "$tmp_candidates" | sed 's/[^0-9]//g')
+  probe_target="$max_probe_hosts"
+
+  if [ -z "$total_candidates" ]; then
+    total_candidates=0
+  fi
+
+  if [ "$total_candidates" -lt "$probe_target" ]; then
+    probe_target="$total_candidates"
+  fi
+
+  : > "$tmp_reachable"
+
+  while IFS="$tab" read -r target display source; do
+    if [ -z "$target" ]; then
+      continue
+    fi
+
+    if [ "$probed_count" -ge "$max_probe_hosts" ]; then
+      break
+    fi
+
+    probed_count=$((probed_count + 1))
+
+    if [ "$quiet" != "true" ]; then
+      printf "\rProbing discovered hosts... %d/%d" "$probed_count" "$probe_target" >&2
+    fi
+
+    ssh_open="no"
+    telnet_open="no"
+    protocol_label=""
+    preferred_port=""
+
+    if check_port "$target" "22"; then
+      ssh_open="yes"
+    fi
+
+    if [ "$enable_telnet" = "yes" ] && [ "$ssh_open" != "yes" ]; then
+      if check_port "$target" "23"; then
+        telnet_open="yes"
+      fi
+    fi
+
+    if [ "$ssh_open" = "yes" ]; then
+      protocol_label="ssh"
+      preferred_port="22"
+    elif [ "$telnet_open" = "yes" ]; then
+      protocol_label="telnet"
+      preferred_port="23"
+    else
+      continue
+    fi
+
+    printf "%s\t%s\t%s\t%s\t%s\n" "$target" "$display" "$protocol_label" "$source" "$preferred_port" >> "$tmp_reachable"
+
+    reachable_count=$((reachable_count + 1))
+    if [ "$reachable_count" -ge "$max_hosts" ]; then
+      break
+    fi
+  done < "$tmp_candidates"
+
+  if [ "$quiet" != "true" ]; then
+    printf "\rProbing discovered hosts... done (%d scanned, %d reachable)\n" "$probed_count" "$reachable_count" >&2
+    if [ "$total_candidates" -gt "$max_probe_hosts" ] && [ "$probed_count" -ge "$max_probe_hosts" ]; then
+      printf "Probe limit reached (%d/%d). Use --max-probe-hosts to scan more.\n" "$max_probe_hosts" "$total_candidates" >&2
+    fi
+  fi
+
+  if [ ! -s "$tmp_reachable" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+print_menu() {
+  clear_screen_if_requested="false"
+  if [ "$force_clear" = "true" ]; then
+    clear_screen_if_requested="true"
+  elif [ "$should_clear_screen" = "true" ]; then
+    clear_screen_if_requested="true"
+  fi
+
+  if [ "$clear_screen_if_requested" = "true" ]; then
+    clear_screen
+  fi
+
+  echo "NTS Remote Discovery v${VERSION}"
+  if [ -n "$network" ]; then
+    echo "Network: ${network}"
+  fi
+  echo "Method: ${method} | Timeout: ${timeout}s | Telnet: ${enable_telnet} | Probe limit: ${max_probe_hosts}"
+  echo ""
+  echo "Discovered reachable hosts:"
+  echo ""
+
+  item_index=1
+  tab=$(printf '\t')
+  while IFS="$tab" read -r target display protocol_label source preferred_port; do
+    label="$display"
+    if [ "$display" != "$target" ]; then
+      label="${display} (${target})"
+    fi
+    printf " %2d) %-40s [%s] (%s)\n" "$item_index" "$label" "$protocol_label" "$source"
+    item_index=$((item_index + 1))
+  done < "$tmp_reachable"
+
+  echo ""
+  echo " r) Rescan"
+  echo " x) Exit"
+  echo ""
+}
+
+select_entry() {
+  selected_index="$1"
+  tab=$(printf '\t')
+  idx=1
+
+  while IFS="$tab" read -r target display protocol_label source preferred_port; do
+    if [ "$idx" -eq "$selected_index" ]; then
+      selected_target="$target"
+      selected_protocol="$protocol_label"
+      selected_port="$preferred_port"
+      return 0
+    fi
+    idx=$((idx + 1))
+  done < "$tmp_reachable"
+
+  return 1
+}
+
+connect_selected() {
+  if [ -n "$ssh_user" ]; then
+    if [ -n "$selected_port" ]; then
+      "$RIA_CMD" -u "$ssh_user" -p "$selected_port" "$selected_target"
+    else
+      "$RIA_CMD" -u "$ssh_user" "$selected_target"
+    fi
+  else
+    if [ -n "$selected_port" ]; then
+      "$RIA_CMD" -p "$selected_port" "$selected_target"
+    else
+      "$RIA_CMD" "$selected_target"
+    fi
+  fi
+
+  return $?
+}
+
+cleanup() {
+  if [ -n "$tmp_candidates" ] && [ -f "$tmp_candidates" ]; then
+    rm -f "$tmp_candidates"
+  fi
+  if [ -n "$tmp_reachable" ] && [ -f "$tmp_reachable" ]; then
+    rm -f "$tmp_reachable"
+  fi
+}
+
+main() {
+  network="$DEFAULT_NETWORK"
+  method="$DEFAULT_METHOD"
+  timeout="$DEFAULT_TIMEOUT"
+  enable_telnet="$DEFAULT_ENABLE_TELNET"
+  max_hosts="$DEFAULT_MAX_HOSTS"
+  max_probe_hosts="$DEFAULT_MAX_PROBE_HOSTS"
+  ssh_user=""
+  force_clear="false"
+  quiet="false"
+
+  load_discovery_config_file "$SYSTEM_DISCOVERY_CONFIG"
+  load_discovery_config_file "$USER_DISCOVERY_CONFIG"
+  load_user_nts_config
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -n|--network)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        network="$2"
+        shift 2
+        continue
+        ;;
+      -m|--method)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        method="$2"
+        shift 2
+        continue
+        ;;
+      -t|--timeout)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        timeout="$2"
+        shift 2
+        continue
+        ;;
+      -u|--user)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        ssh_user="$2"
+        shift 2
+        continue
+        ;;
+      --no-telnet)
+        enable_telnet="no"
+        shift
+        continue
+        ;;
+      --max-hosts)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        max_hosts="$2"
+        shift 2
+        continue
+        ;;
+      --max-probe-hosts)
+        if [ "$#" -lt 2 ]; then
+          print_error "Missing argument for $1"
+          exit 1
+        fi
+        max_probe_hosts="$2"
+        shift 2
+        continue
+        ;;
+      -c|--clear)
+        force_clear="true"
+        shift
+        continue
+        ;;
+      -q|--quiet)
+        quiet="true"
+        shift
+        continue
+        ;;
+      -v|--version)
+        echo "NTS rdiscover v${VERSION}"
+        exit 0
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      -*)
+        print_error "Unknown option: $1"
+        print_usage
+        exit 1
+        ;;
+      *)
+        print_error "Unexpected argument: $1"
+        print_usage
+        exit 1
+        ;;
+    esac
+  done
+
+  case "$method" in
+    auto|nmap|neighbors|known-hosts|known_hosts|knownhosts)
+      ;;
+    *)
+      print_error "Invalid method: $method"
+      exit 1
+      ;;
+  esac
+
+  if ! is_positive_integer "$timeout" || [ "$timeout" -le 0 ]; then
+    print_error "Timeout must be a positive integer"
+    exit 1
+  fi
+
+  if ! is_positive_integer "$max_hosts" || [ "$max_hosts" -le 0 ]; then
+    print_error "Max hosts must be a positive integer"
+    exit 1
+  fi
+
+  if ! is_positive_integer "$max_probe_hosts" || [ "$max_probe_hosts" -le 0 ]; then
+    print_error "Max probe hosts must be a positive integer"
+    exit 1
+  fi
+
+  case "$enable_telnet" in
+    yes|no)
+      ;;
+    *)
+      print_error "enable-telnet must be yes or no"
+      exit 1
+      ;;
+  esac
+
+  if ! resolve_commands; then
+    exit 1
+  fi
+
+  tmp_candidates=$(mktemp /tmp/nts_rdiscover_candidates.XXXXXX 2>/dev/null)
+  tmp_reachable=$(mktemp /tmp/nts_rdiscover_reachable.XXXXXX 2>/dev/null)
+  if [ -z "$tmp_candidates" ] || [ -z "$tmp_reachable" ]; then
+    print_error "Unable to create temporary files"
+    exit 1
+  fi
+  trap cleanup EXIT INT TERM
+
+  while :; do
+    log_info "Discovering hosts..."
+    if ! discover_candidates; then
+      echo ""
+      print_error "Host discovery failed"
+      echo "Press Enter to retry, or type x to exit."
+      read -r retry_choice
+      case "$retry_choice" in
+        x|X)
+          exit 1
+          ;;
+      esac
+      continue
+    fi
+
+    log_info "Probing discovered hosts for SSH/Telnet..."
+    if ! probe_candidates; then
+      echo ""
+      print_error "No reachable SSH/Telnet hosts found"
+      echo "Press Enter to rescan, or type x to exit."
+      read -r empty_choice
+      case "$empty_choice" in
+        x|X)
+          exit 1
+          ;;
+      esac
+      continue
+    fi
+
+    while :; do
+      print_menu
+      printf "Select host: "
+      read -r selection
+
+      case "$selection" in
+        x|X)
+          exit 0
+          ;;
+        r|R)
+          break
+          ;;
+        *)
+          if ! is_positive_integer "$selection"; then
+            echo "Invalid selection: $selection"
+            sleep 1
+            continue
+          fi
+
+          if ! select_entry "$selection"; then
+            echo "Invalid selection: $selection"
+            sleep 1
+            continue
+          fi
+
+          clear_screen
+          echo "Connecting to ${selected_target} (${selected_protocol})..."
+          if ! connect_selected; then
+            echo ""
+            print_error "Connection failed"
+          fi
+          echo ""
+          echo "Press Enter to return to the discovered host list."
+          read -r continue_choice
+          ;;
+      esac
+    done
+  done
+}
+
+main "$@"
