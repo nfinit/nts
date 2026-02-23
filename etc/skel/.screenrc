@@ -1,0 +1,44 @@
+# NTS standard .screenrc
+# ----------------------
+
+bind r eval "source $HOME/.screenrc" "echo 'Configuration reloaded'"
+
+# tmux-like split bindings
+bind - eval "split" "focus down" "screen"
+bind | eval "split -v" "focus right" "screen"
+
+# keep Screen's original "select -" on an alternate key
+bind _ select -
+
+# Swap x/X behavior: x closes region, X locks screen
+bind x remove
+bind X lockscreen
+
+# Prefix + arrow keys move focus between regions (keeps normal arrow behavior in apps)
+bindkey -t "\001\033[D" focus left
+bindkey -t "\001\033[C" focus right
+bindkey -t "\001\033[A" focus up
+bindkey -t "\001\033[B" focus down
+bindkey -t "\001\033OD" focus left
+bindkey -t "\001\033OC" focus right
+bindkey -t "\001\033OA" focus up
+bindkey -t "\001\033OB" focus down
+
+# Fallback pane-nav mode for old terminals: C-a g, then h/j/k/l (q or Esc to exit)
+bind g eval "echo 'Pane-nav mode: h/j/k/l (q or Esc exits)'" "command -c pane_nav"
+bind -c pane_nav h eval "focus left" "command -c pane_nav"
+bind -c pane_nav j eval "focus down" "command -c pane_nav"
+bind -c pane_nav k eval "focus up" "command -c pane_nav"
+bind -c pane_nav l eval "focus right" "command -c pane_nav"
+bind -c pane_nav q echo "Pane-nav mode off"
+bind -c pane_nav \033 echo "Pane-nav mode off"
+
+# Color terminal settings
+# term screen-256color
+# defbce on
+# termcapinfo xterm* 'Co#256:AB=\E[48;5;%dm:AF=\E[38;5;%dm'
+
+defscrollback 10000
+# defmonitor on
+# shelltitle '$ |zsh'
+hardstatus alwayslastline " %w %= %H %l %C %A "
