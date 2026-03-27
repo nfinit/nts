@@ -2,6 +2,10 @@
 # set-resolution - Display resolution selection utility
 # Part of the NTS (New Terminal System)
 
+# Derive NTS root from script location
+NTS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$NTS_DIR/lib/nts-select.sh"
+
 print_usage() {
   echo "Usage: set-resolution [options]"
   echo ""
@@ -38,7 +42,6 @@ get_modes() {
     }
   '
 }
-
 
 # Apply a resolution to an output
 apply_resolution() {
@@ -85,51 +88,27 @@ run_menu() {
   if [ -n "$current" ]; then
     echo "Current:  $current"
   fi
-  echo ""
 
-  # Number and display each mode
-  i=1
+  # Build display labels, marking current with *
+  labels=""
   for mode in $modes; do
-    marker=""
     if [ "$mode" = "$current" ]; then
-      marker=" *"
+      labels="${labels}${mode} *
+"
+    else
+      labels="${labels}${mode}
+"
     fi
-    printf "  %2d) %s%s\n" "$i" "$mode" "$marker"
-    i=$((i + 1))
   done
 
-  echo ""
-  printf "Select resolution (1-%d), or q to quit: " "$((i - 1))"
-  read -r choice
-
-  case "$choice" in
-    q|Q|"")
-      echo "No changes made."
-      exit 0
-      ;;
-  esac
-
-  # Validate numeric input
-  if ! echo "$choice" | grep -q '^[0-9]\{1,\}$'; then
-    echo "Error: invalid selection." >&2
-    exit 1
+  selected=$(printf "%s" "$labels" | nts_select_stdin "Select resolution")
+  if [ $? -ne 0 ]; then
+    echo "No changes made."
+    exit 0
   fi
 
-  if [ "$choice" -lt 1 ] || [ "$choice" -ge "$i" ]; then
-    echo "Error: selection out of range." >&2
-    exit 1
-  fi
-
-  # Find the selected mode
-  j=1
-  selected=""
-  for mode in $modes; do
-    if [ "$j" -eq "$choice" ]; then
-      selected="$mode"
-      break
-    fi
-    j=$((j + 1))
-  done
+  # Strip the * marker if present
+  selected=$(echo "$selected" | sed 's/ \*$//')
 
   if [ "$selected" = "$current" ]; then
     echo "Already at ${selected}, no change needed."

@@ -20,9 +20,13 @@ fi
 
 echo "Installing NTS from $NTS_DIR ..."
 
-# Ensure all bin scripts are executable
+# Ensure all bin and lib scripts are executable
 echo "  Setting permissions on $NTS_DIR/bin/ ..."
 chmod +x "$NTS_DIR/bin/"*
+if [ -d "$NTS_DIR/lib" ] && ls "$NTS_DIR/lib/"* >/dev/null 2>&1; then
+    echo "  Setting permissions on $NTS_DIR/lib/ ..."
+    chmod +x "$NTS_DIR/lib/"*
+fi
 
 # Symlink profile.d scripts into /etc/profile.d
 echo "  Linking profile.d scripts ..."
