@@ -12,7 +12,8 @@
 # Newline-delimited input:
 #   result=$(echo "$items" | nts_select_stdin "Pick one")
 #
-# Both functions print the selected item to stdout.
+# Both functions print the selected item to stdout (for capture).
+# Menu display and prompts go to stderr (visible to the user).
 # Exit status: 0 on selection, 1 on quit/cancel.
 
 # Present a numbered menu from positional arguments.
@@ -28,16 +29,16 @@ nts_select() {
 
   _nts_sel_count="$#"
 
-  echo ""
+  echo "" >&2
   _nts_sel_i=1
   for _nts_sel_item in "$@"; do
-    printf "  %2d) %s\n" "$_nts_sel_i" "$_nts_sel_item"
+    printf "  %2d) %s\n" "$_nts_sel_i" "$_nts_sel_item" >&2
     _nts_sel_i=$((_nts_sel_i + 1))
   done
 
-  echo ""
-  printf "%s (1-%d), or q to quit: " "$_nts_sel_prompt" "$_nts_sel_count"
-  read -r _nts_sel_choice
+  echo "" >&2
+  printf "%s (1-%d), or q to quit: " "$_nts_sel_prompt" "$_nts_sel_count" >&2
+  read -r _nts_sel_choice </dev/tty
 
   case "$_nts_sel_choice" in
     q|Q|"")
@@ -76,11 +77,11 @@ nts_select_stdin() {
   _nts_sel_items=""
   _nts_sel_count=0
 
-  echo ""
+  echo "" >&2
   while IFS= read -r _nts_sel_line; do
     [ -z "$_nts_sel_line" ] && continue
     _nts_sel_count=$((_nts_sel_count + 1))
-    printf "  %2d) %s\n" "$_nts_sel_count" "$_nts_sel_line"
+    printf "  %2d) %s\n" "$_nts_sel_count" "$_nts_sel_line" >&2
     _nts_sel_items="${_nts_sel_items}${_nts_sel_line}
 "
   done
@@ -90,9 +91,9 @@ nts_select_stdin() {
     return 1
   fi
 
-  echo ""
-  printf "%s (1-%d), or q to quit: " "$_nts_sel_prompt" "$_nts_sel_count"
-  read -r _nts_sel_choice
+  echo "" >&2
+  printf "%s (1-%d), or q to quit: " "$_nts_sel_prompt" "$_nts_sel_count" >&2
+  read -r _nts_sel_choice </dev/tty
 
   case "$_nts_sel_choice" in
     q|Q|"")

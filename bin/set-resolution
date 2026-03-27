@@ -6,28 +6,37 @@
 NTS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$NTS_DIR/lib/nts-select.sh"
 
+# Config paths
+SYSTEM_CONFIG_DIR="${NTS_DIR}/etc"
+USER_CONFIG_DIR="${HOME}/.config/nts"
+RESOLUTIONS_CONF="resolutions.conf"
+
 print_usage() {
   echo "Usage: set-resolution [options]"
   echo ""
   echo "Interactive display resolution selector using xrandr."
   echo ""
   echo "Options:"
+  echo "  -a, --auto          Auto-set client preferred resolution, or show menu"
   echo "  -l, --list          List available resolutions and exit"
   echo "  -s, --set WxH       Set resolution directly (e.g. -s 1920x1080)"
   echo "  -o, --output NAME   Target a specific output (default: auto-detect)"
   echo "  -h, --help          Display this help message"
+  echo ""
+  echo "Client-based resolution preferences can be configured in:"
+  echo "  ${SYSTEM_CONFIG_DIR}/${RESOLUTIONS_CONF}  (system-wide)"
+  echo "  ${USER_CONFIG_DIR}/${RESOLUTIONS_CONF}    (per-user override)"
+  echo ""
+  echo "Format: one entry per line, IP=WIDTHxHEIGHT"
+  echo "  # Desktop"
+  echo "  192.168.1.10=1920x1200"
+  echo "  # Old Mac"
+  echo "  192.168.1.42=1600x1024"
 }
 
 # Detect the active output name from xrandr
 detect_output() {
-  xrandr 2>/dev/null | while IFS= read -r line; do
-    case "$line" in
-      *" connected "*)
-        echo "$line" | cut -d' ' -f1
-        return 0
-        ;;
-    esac
-  done
+  xrandr 2>/dev/null | awk '/connected/ && !/disconnected/ { print $1; exit }'
 }
 
 # Get available modes for a given output
@@ -41,6 +50,100 @@ get_modes() {
       if (a[1]+0 > 0) print $1
     }
   '
+}
+
+# Detect the VNC client IP address.
+# Tries multiple methods: ss on VNC ports, then who/w for remote address.
+detect_client_ip() {
+  # Try ss: look for established connections to VNC ports (5900-5999)
+  if command -v ss >/dev/null 2>&1; then
+    _client=$(ss -tn state established 2>/dev/null | awk '
+      /:(590[0-9])[ \t]/ {
+        # Peer address is the last field
+        split($NF, a, ":")
+        # Handle IPv4-mapped IPv6 (e.g., ::ffff:10.0.0.1)
+        gsub(/^\[?::ffff:/, "", a[1])
+        gsub(/\]$/, "", a[1])
+        if (a[1] != "" && a[1] != "127.0.0.1" && a[1] != "::1") {
+          print a[1]
+          exit
+        }
+      }
+    ')
+    if [ -n "$_client" ]; then
+      echo "$_client"
+      return 0
+    fi
+  fi
+
+  # Fallback: parse who for current tty's remote address
+  if command -v who >/dev/null 2>&1; then
+    _client=$(who -m 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p')
+    if [ -n "$_client" ]; then
+      echo "$_client"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# Look up a preferred resolution for a given IP address.
+# Checks user config first, then system config.
+lookup_client_resolution() {
+  _ip="$1"
+  _result=""
+
+  for _conf in "$USER_CONFIG_DIR/$RESOLUTIONS_CONF" "$SYSTEM_CONFIG_DIR/$RESOLUTIONS_CONF"; do
+    [ -f "$_conf" ] || continue
+    while IFS= read -r _line; do
+      case "$_line" in
+        ""|\#*) continue ;;
+      esac
+      _key=$(echo "$_line" | cut -d= -f1)
+      _val=$(echo "$_line" | cut -d= -f2-)
+      if [ "$_key" = "$_ip" ]; then
+        _result="$_val"
+        break
+      fi
+    done < "$_conf"
+    # User config takes priority — if we found a match, stop
+    [ -n "$_result" ] && break
+  done
+
+  if [ -n "$_result" ]; then
+    echo "$_result"
+    return 0
+  fi
+  return 1
+}
+
+# Save a client IP -> resolution preference to the user config.
+save_client_preference() {
+  _ip="$1"
+  _mode="$2"
+  _conf="$USER_CONFIG_DIR/$RESOLUTIONS_CONF"
+
+  mkdir -p "$USER_CONFIG_DIR" 2>/dev/null
+
+  # Update existing entry or append new one
+  if [ -f "$_conf" ] && grep -q "^${_ip}=" "$_conf" 2>/dev/null; then
+    # Replace existing line for this IP
+    _tmp="${_conf}.tmp.$$"
+    while IFS= read -r _line; do
+      case "$_line" in
+        "${_ip}="*)
+          echo "${_ip}=${_mode}"
+          ;;
+        *)
+          echo "$_line"
+          ;;
+      esac
+    done < "$_conf" > "$_tmp"
+    mv "$_tmp" "$_conf"
+  else
+    echo "${_ip}=${_mode}" >> "$_conf"
+  fi
 }
 
 # Apply a resolution to an output
@@ -83,32 +186,91 @@ run_menu() {
     found && /\*/ { print $1; exit }
   ')
 
+  # Check for client-preferred resolution
+  client_ip=$(detect_client_ip)
+  client_pref=""
+  if [ -n "$client_ip" ]; then
+    client_pref=$(lookup_client_resolution "$client_ip")
+  fi
+
   echo ""
   echo "Display: $output"
   if [ -n "$current" ]; then
     echo "Current:  $current"
   fi
-
-  # Build display labels, marking current with *
-  labels=""
-  for mode in $modes; do
-    if [ "$mode" = "$current" ]; then
-      labels="${labels}${mode} *
-"
+  if [ -n "$client_ip" ]; then
+    if [ -n "$client_pref" ]; then
+      echo "Client:   $client_ip (preferred: $client_pref)"
     else
-      labels="${labels}${mode}
-"
+      echo "Client:   $client_ip (no preference configured)"
     fi
-  done
-
-  selected=$(printf "%s" "$labels" | nts_select_stdin "Select resolution")
-  if [ $? -ne 0 ]; then
-    echo "No changes made."
-    exit 0
   fi
 
-  # Strip the * marker if present
-  selected=$(echo "$selected" | sed 's/ \*$//')
+  # Display numbered mode list
+  echo ""
+  i=1
+  for mode in $modes; do
+    marker=""
+    if [ "$mode" = "$current" ]; then
+      marker=" *"
+    fi
+    if [ "$mode" = "$client_pref" ] && [ "$mode" != "$current" ]; then
+      marker=" (preferred)"
+    elif [ "$mode" = "$client_pref" ] && [ "$mode" = "$current" ]; then
+      marker=" * (preferred)"
+    fi
+    printf "  %2d) %s%s\n" "$i" "$mode" "$marker"
+    i=$((i + 1))
+  done
+
+  # Show save option if we can detect the client
+  if [ -n "$client_ip" ] && [ -n "$current" ]; then
+    echo ""
+    echo "   s) Save current resolution ($current) as preference for $client_ip"
+  fi
+
+  echo ""
+  printf "Select resolution (1-%d), s to save, or q to quit: " "$((i - 1))"
+  read -r choice </dev/tty
+
+  case "$choice" in
+    q|Q|"")
+      echo "No changes made."
+      exit 0
+      ;;
+    s|S)
+      if [ -z "$client_ip" ]; then
+        echo "Error: could not detect client IP." >&2
+        exit 1
+      fi
+      save_client_preference "$client_ip" "$current"
+      echo "Saved $current as preferred resolution for $client_ip."
+      echo "Future sessions with -a will apply this automatically."
+      exit 0
+      ;;
+  esac
+
+  # Validate numeric input
+  if ! echo "$choice" | grep -q '^[0-9]\{1,\}$'; then
+    echo "Error: invalid selection." >&2
+    exit 1
+  fi
+
+  if [ "$choice" -lt 1 ] || [ "$choice" -ge "$i" ]; then
+    echo "Error: selection out of range." >&2
+    exit 1
+  fi
+
+  # Find the selected mode
+  j=1
+  selected=""
+  for mode in $modes; do
+    if [ "$j" -eq "$choice" ]; then
+      selected="$mode"
+      break
+    fi
+    j=$((j + 1))
+  done
 
   if [ "$selected" = "$current" ]; then
     echo "Already at ${selected}, no change needed."
@@ -126,6 +288,9 @@ main() {
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      -a|--auto)
+        action="auto"
+        ;;
       -l|--list)
         action="list"
         ;;
@@ -167,6 +332,18 @@ main() {
   fi
 
   case "$action" in
+    auto)
+      client_ip=$(detect_client_ip)
+      if [ -n "$client_ip" ]; then
+        client_pref=$(lookup_client_resolution "$client_ip")
+        if [ -n "$client_pref" ]; then
+          apply_resolution "$target_output" "$client_pref"
+          exit $?
+        fi
+      fi
+      # No preference found — fall through to interactive menu
+      run_menu "$target_output"
+      ;;
     list)
       modes=$(get_modes "$target_output")
       if [ -z "$modes" ]; then
