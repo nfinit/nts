@@ -1,0 +1,208 @@
+#!/bin/sh
+# set-resolution - Display resolution selection utility
+# Part of the NTS (New Terminal System)
+
+print_usage() {
+  echo "Usage: set-resolution [options]"
+  echo ""
+  echo "Interactive display resolution selector using xrandr."
+  echo ""
+  echo "Options:"
+  echo "  -l, --list          List available resolutions and exit"
+  echo "  -s, --set WxH       Set resolution directly (e.g. -s 1920x1080)"
+  echo "  -o, --output NAME   Target a specific output (default: auto-detect)"
+  echo "  -h, --help          Display this help message"
+}
+
+# Detect the active output name from xrandr
+detect_output() {
+  xrandr 2>/dev/null | while IFS= read -r line; do
+    case "$line" in
+      *" connected "*)
+        echo "$line" | cut -d' ' -f1
+        return 0
+        ;;
+    esac
+  done
+}
+
+# Get available modes for a given output
+get_modes() {
+  output="$1"
+  xrandr 2>/dev/null | awk -v out="$output" '
+    $1 == out && /connected/ { found=1; next }
+    found && /^[^ ]/ { exit }
+    found && /^   / {
+      split($1, a, "x")
+      if (a[1]+0 > 0) print $1
+    }
+  '
+}
+
+
+# Apply a resolution to an output
+apply_resolution() {
+  output="$1"
+  mode="$2"
+
+  # Validate mode format
+  case "$mode" in
+    [0-9]*x[0-9]*)
+      ;;
+    *)
+      echo "Error: invalid resolution format: $mode" >&2
+      return 1
+      ;;
+  esac
+
+  echo "Setting $output to ${mode} ..."
+  if xrandr --output "$output" --mode "$mode" 2>/dev/null; then
+    echo "Done."
+  else
+    echo "Error: failed to set resolution. Mode may not be supported." >&2
+    return 1
+  fi
+}
+
+# Display interactive menu of available modes
+run_menu() {
+  output="$1"
+  modes=$(get_modes "$output")
+
+  if [ -z "$modes" ]; then
+    echo "Error: no available modes found for output: $output" >&2
+    exit 1
+  fi
+
+  # Detect current resolution
+  current=$(xrandr 2>/dev/null | awk -v out="$output" '
+    $1 == out && /connected/ { found=1; next }
+    found && /\*/ { print $1; exit }
+  ')
+
+  echo ""
+  echo "Display: $output"
+  if [ -n "$current" ]; then
+    echo "Current:  $current"
+  fi
+  echo ""
+
+  # Number and display each mode
+  i=1
+  for mode in $modes; do
+    marker=""
+    if [ "$mode" = "$current" ]; then
+      marker=" *"
+    fi
+    printf "  %2d) %s%s\n" "$i" "$mode" "$marker"
+    i=$((i + 1))
+  done
+
+  echo ""
+  printf "Select resolution (1-%d), or q to quit: " "$((i - 1))"
+  read -r choice
+
+  case "$choice" in
+    q|Q|"")
+      echo "No changes made."
+      exit 0
+      ;;
+  esac
+
+  # Validate numeric input
+  if ! echo "$choice" | grep -q '^[0-9]\{1,\}$'; then
+    echo "Error: invalid selection." >&2
+    exit 1
+  fi
+
+  if [ "$choice" -lt 1 ] || [ "$choice" -ge "$i" ]; then
+    echo "Error: selection out of range." >&2
+    exit 1
+  fi
+
+  # Find the selected mode
+  j=1
+  selected=""
+  for mode in $modes; do
+    if [ "$j" -eq "$choice" ]; then
+      selected="$mode"
+      break
+    fi
+    j=$((j + 1))
+  done
+
+  if [ "$selected" = "$current" ]; then
+    echo "Already at ${selected}, no change needed."
+    exit 0
+  fi
+
+  apply_resolution "$output" "$selected"
+}
+
+# Main
+main() {
+  action="menu"
+  target_output=""
+  set_mode=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -l|--list)
+        action="list"
+        ;;
+      -s|--set)
+        shift
+        set_mode="$1"
+        action="set"
+        ;;
+      -o|--output)
+        shift
+        target_output="$1"
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      *)
+        echo "Error: unknown option: $1" >&2
+        print_usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  # Require xrandr
+  if ! command -v xrandr >/dev/null 2>&1; then
+    echo "Error: xrandr is required but not found." >&2
+    exit 1
+  fi
+
+  # Auto-detect output if not specified
+  if [ -z "$target_output" ]; then
+    target_output=$(detect_output)
+    if [ -z "$target_output" ]; then
+      echo "Error: no connected display found." >&2
+      exit 1
+    fi
+  fi
+
+  case "$action" in
+    list)
+      modes=$(get_modes "$target_output")
+      if [ -z "$modes" ]; then
+        echo "No modes found for output: $target_output" >&2
+        exit 1
+      fi
+      echo "$modes"
+      ;;
+    set)
+      apply_resolution "$target_output" "$set_mode"
+      ;;
+    menu)
+      run_menu "$target_output"
+      ;;
+  esac
+}
+
+main "$@"
